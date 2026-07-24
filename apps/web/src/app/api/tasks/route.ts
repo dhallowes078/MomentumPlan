@@ -1,0 +1,98 @@
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { requireUser, jsonError } from "@/lib/api";
+import { assertWorkspaceAccess } from "@/lib/workspace";
+import { prisma } from "@/lib/db";
+import { runSchedulerForUser } from "@/lib/scheduler-service";
+
+const createSchema = z.object({
+  workspaceId: z.string().min(1),
+  title: z.string().min(1).max(300),
+  notes: z.string().optional().nullable(),
+  priority: z.number().int().min(1).max(5).optional(),
+  estimateMinutes: z.number().int().min(5).max(8 * 60).optional(),
+  dueAt: z.string().datetime().optional().nullable(),
+  bucketId: z.string().optional().nullable(),
+  assigneeId: z.string().optional().nullable(),
+  links: z.array(z.object({ url: z.string().url(), title: z.string().optional() })).optional(),
+  locked: z.boolean().optional(),
+  allowSplit: z.boolean().optional(),
+});
+
+export async function GET(req: Request) {
+  const { userId, error } = await requireUser();
+  if (error) return error;
+
+  const url = new URL(req.url);
+  const workspaceId = url.searchParams.get("workspaceId");
+  if (!workspaceId) return jsonError("workspaceId required");
+
+  try {
+    await assertWorkspaceAccess(userId, workspaceId);
+  } catch {
+    return jsonError("Forbidden", 403);
+  }
+
+  const status = url.searchParams.get("status");
+  const bucketId = url.searchParams.get("bucketId");
+
+  const tasks = await prisma.task.findMany({
+    where: {
+      workspaceId,
+      ...(status ? { status: status as "TODO" | "IN_PROGRESS" | "DONE" | "CANCELLED" } : {}),
+      ...(bucketId ? { bucketId } : {}),
+    },
+    include: {
+      bucket: true,
+      assignee: { select: { id: true, name: true, email: true, image: true } },
+      links: true,
+      _count: { select: { comments: true, attachments: true } },
+    },
+    orderBy: [{ priority: "desc" }, { dueAt: "asc" }, { createdAt: "asc" }],
+  });
+
+  return NextResponse.json({ tasks });
+}
+
+export async function POST(req: Request) {
+  const { userId, error } = await requireUser();
+  if (error) return error;
+
+  const parsed = createSchema.safeParse(await req.json());
+  if (!parsed.success) return jsonError(parsed.error.message);
+
+  const data = parsed.data;
+  try {
+    await assertWorkspaceAccess(userId, data.workspaceId);
+  } catch {
+    return jsonError("Forbidden", 403);
+  }
+
+  const task = await prisma.task.create({
+    data: {
+      workspaceId: data.workspaceId,
+      title: data.title,
+      notes: data.notes ?? null,
+      priority: data.priority ?? 3,
+      estimateMinutes: data.estimateMinutes ?? 30,
+      dueAt: data.dueAt ? new Date(data.dueAt) : null,
+      bucketId: data.bucketId ?? null,
+      assigneeId: data.assigneeId ?? userId,
+      createdById: userId,
+      locked: data.locked ?? false,
+      allowSplit: data.allowSplit ?? true,
+      links: data.links
+        ? { create: data.links.map((l) => ({ url: l.url, title: l.title })) }
+        : undefined,
+      events: {
+        create: { type: "CREATED", actorId: userId },
+      },
+    },
+    include: { links: true, bucket: true, assignee: true },
+  });
+
+  // Fire-and-forget reschedule
+  void runSchedulerForUser(userId).catch(console.error);
+
+  return NextResponse.json({ task }, { status: 201 });
+}

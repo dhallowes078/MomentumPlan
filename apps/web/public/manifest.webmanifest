@@ -1,0 +1,17 @@
+{
+  "name": "Momentum",
+  "short_name": "Momentum",
+  "description": "Auto-schedule tasks into your Outlook day",
+  "start_url": "/today",
+  "display": "standalone",
+  "background_color": "#e8efe9",
+  "theme_color": "#1f4d3a",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
