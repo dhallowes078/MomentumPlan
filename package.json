@@ -1,0 +1,20 @@
+{
+  "name": "momentum",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @momentum/web",
+    "build": "npm run build -w @momentum/scheduler && npm run build -w @momentum/web",
+    "db:generate": "npm run db:generate -w @momentum/web",
+    "db:push": "npm run db:push -w @momentum/web",
+    "db:migrate": "npm run db:migrate -w @momentum/web",
+    "test": "npm run test -w @momentum/scheduler",
+    "lint": "npm run lint -w @momentum/web"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
