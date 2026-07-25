@@ -502,6 +502,48 @@ select {
   place-items: center;
 }
 
+.cal-now-line-h {
+  position: absolute;
+  top: 1.2rem;
+  bottom: 0;
+  width: 2px;
+  background: var(--danger);
+  z-index: 6;
+  pointer-events: none;
+  transform: translateX(-1px);
+}
+
+.cal-now-line-h .cal-now-dot {
+  position: absolute;
+  top: -4px;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--danger);
+  transform: translateX(-50%);
+}
+
+.cal-now-line-v {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--danger);
+  z-index: 6;
+  pointer-events: none;
+}
+
+.cal-now-line-v .cal-now-label {
+  position: absolute;
+  left: 0;
+  top: -0.85rem;
+  font-size: 0.65rem;
+  font-weight: 650;
+  color: var(--danger);
+  letter-spacing: 0.02em;
+}
+
 .task-fade-card {
   position: relative;
   overflow: hidden;

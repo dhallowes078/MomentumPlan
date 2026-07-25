@@ -12,11 +12,12 @@ export async function GET() {
   const from = startOfDay(now);
   const to = endOfDay(now);
 
-  // Push incomplete past blocks forward instead of leaving them "missed".
+  // Push incomplete blocks only after their timeslot has ended (overrun).
   const stale = await prisma.scheduleBlock.count({
     where: {
       userId,
       end: { lt: now },
+      completed: false,
       task: { status: { in: ["TODO", "IN_PROGRESS"] } },
     },
   });

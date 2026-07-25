@@ -49,6 +49,10 @@ export default function CalendarPage() {
   const [breakStart, setBreakStart] = useState<number | null>(720);
   const [breakEnd, setBreakEnd] = useState<number | null>(780);
   const [viewportH, setViewportH] = useState(800);
+  const [nowMinutes, setNowMinutes] = useState(() => {
+    const n = new Date();
+    return n.getHours() * 60 + n.getMinutes();
+  });
   const todayRef = useRef<HTMLDivElement | null>(null);
 
   const today = useMemo(() => startOfDay(new Date()), []);
@@ -84,6 +88,16 @@ export default function CalendarPage() {
   }, [load]);
 
   useEffect(() => {
+    const tick = () => {
+      const n = new Date();
+      setNowMinutes(n.getHours() * 60 + n.getMinutes());
+    };
+    tick();
+    const id = window.setInterval(tick, 30_000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  useEffect(() => {
     const update = () => setViewportH(window.innerHeight);
     update();
     window.addEventListener("resize", update);
@@ -113,6 +127,7 @@ export default function CalendarPage() {
     { length: Math.ceil(daySpan / 60) + 1 },
     (_, i) => startMinutes + i * 60
   ).filter((m) => m <= endMinutes);
+  const showNowLine = nowMinutes >= startMinutes && nowMinutes <= endMinutes;
 
   function dayContent(day: Date) {
     const dayStart = day;
@@ -219,6 +234,15 @@ export default function CalendarPage() {
                         {String(m % 60).padStart(2, "0")}
                       </div>
                     ))}
+                    {isToday && showNowLine && (
+                      <div
+                        className="cal-now-line-h"
+                        style={{ left: minutesToOffset(nowMinutes, startMinutes, horizontalPxPerMin) }}
+                        title="Now"
+                      >
+                        <span className="cal-now-dot" />
+                      </div>
+                    )}
                     {breakStart != null &&
                       breakEnd != null &&
                       breakEnd > breakStart && (
@@ -317,6 +341,15 @@ export default function CalendarPage() {
                       {String(m % 60).padStart(2, "0")}
                     </div>
                   ))}
+                  {isToday && showNowLine && (
+                    <div
+                      className="cal-now-line-v"
+                      style={{ top: minutesToOffset(nowMinutes, startMinutes, verticalPxPerMin) }}
+                      title="Now"
+                    >
+                      <span className="cal-now-label">Now</span>
+                    </div>
+                  )}
                   {breakStart != null &&
                     breakEnd != null &&
                     breakEnd > breakStart && (

@@ -90,24 +90,61 @@ export async function runSchedulerForUser(userId: string) {
   }
 
   // Completed chunks stay put and count as busy + done time.
+  // In-progress chunks also stay put until their end time — the user may
+  // still be working, so we only push after the timeslot is overrun.
   const completedBusy: BusyBlock[] = [];
+  const stickyBusy: BusyBlock[] = [];
+  const stickyBlockIds = new Set<string>();
   const completedMinutesByTask = new Map<string, number>();
+  const stickyMinutesByTask = new Map<string, number>();
+
   for (const task of tasks) {
     let doneMin = 0;
+    let stickyMin = 0;
     for (const block of task.scheduleBlocks) {
-      if (!block.completed) continue;
-      completedBusy.push({ start: block.start, end: block.end });
-      doneMin += Math.max(
+      if (block.completed) {
+        completedBusy.push({ start: block.start, end: block.end });
+        doneMin += Math.max(
+          0,
+          Math.round((block.end.getTime() - block.start.getTime()) / MS_PER_MIN)
+        );
+        continue;
+      }
+      if (block.start <= now && block.end > now) {
+        stickyBusy.push({ start: block.start, end: block.end });
+        stickyBlockIds.add(block.id);
+        stickyMin += Math.max(
+          0,
+          Math.round((block.end.getTime() - block.start.getTime()) / MS_PER_MIN)
+        );
+      }
+    }
+    // Task-level window currently underway (no block row yet).
+    if (
+      stickyMin === 0 &&
+      !task.locked &&
+      task.scheduledStart &&
+      task.scheduledEnd &&
+      task.scheduledStart <= now &&
+      task.scheduledEnd > now
+    ) {
+      stickyBusy.push({ start: task.scheduledStart, end: task.scheduledEnd });
+      stickyMin += Math.max(
         0,
-        Math.round((block.end.getTime() - block.start.getTime()) / MS_PER_MIN)
+        Math.round(
+          (task.scheduledEnd.getTime() - task.scheduledStart.getTime()) / MS_PER_MIN
+        )
       );
     }
     completedMinutesByTask.set(task.id, doneMin);
+    stickyMinutesByTask.set(task.id, stickyMin);
   }
 
   const schedulable: SchedulableTask[] = tasks
     .map((t) => {
-      const remaining = Math.max(0, t.estimateMinutes - (completedMinutesByTask.get(t.id) ?? 0));
+      const reserved =
+        (completedMinutesByTask.get(t.id) ?? 0) + (stickyMinutesByTask.get(t.id) ?? 0);
+      const remaining = Math.max(0, t.estimateMinutes - reserved);
       return {
         id: t.id,
         priority: t.priority,
@@ -120,11 +157,11 @@ export async function runSchedulerForUser(userId: string) {
         createdAt: t.createdAt,
       };
     })
-    .filter((t) => t.estimateMinutes > 0 || t.locked);
+    .filter((t) => t.estimateMinutes > 0 || t.locked || (stickyMinutesByTask.get(t.id) ?? 0) > 0);
 
   const result = packSchedule(
     schedulable,
-    [...outlookBusy, ...completedBusy],
+    [...outlookBusy, ...completedBusy, ...stickyBusy],
     now,
     prefs
   );
@@ -143,15 +180,18 @@ export async function runSchedulerForUser(userId: string) {
     const completedBlocks = existingBlocks.filter(
       (b) => b.taskId === task.id && b.completed
     );
+    const stickyBlocks = existingBlocks.filter(
+      (b) => b.taskId === task.id && stickyBlockIds.has(b.id)
+    );
     for (const b of completedBlocks) usedBlockIds.add(b.id);
+    for (const b of stickyBlocks) usedBlockIds.add(b.id);
 
     const placements = byTask.get(task.id) ?? [];
-    const primary = placements[0];
     const atRisk =
       result.unplaced.some((u) => u.taskId === task.id && u.atRisk) ||
       placements.some((p) => p.atRisk);
 
-    if (!primary && completedBlocks.length === 0) {
+    if (placements.length === 0 && completedBlocks.length === 0 && stickyBlocks.length === 0) {
       const changed =
         task.scheduledStart != null || task.scheduledEnd != null || task.atRisk !== atRisk;
       if (changed) {
@@ -167,12 +207,22 @@ export async function runSchedulerForUser(userId: string) {
       continue;
     }
 
-    const last = placements[placements.length - 1] ?? null;
-    const windowStart = primary?.start ?? completedBlocks[0]?.start ?? null;
+    const starts = [
+      ...stickyBlocks.map((b) => b.start),
+      ...placements.map((p) => p.start),
+      ...completedBlocks.map((b) => b.start),
+    ];
+    const ends = [
+      ...stickyBlocks.map((b) => b.end),
+      ...placements.map((p) => p.end),
+      ...completedBlocks.map((b) => b.end),
+    ];
+    const windowStart =
+      starts.length > 0
+        ? new Date(Math.min(...starts.map((d) => d.getTime())))
+        : null;
     const windowEndSlot =
-      last?.end ??
-      completedBlocks[completedBlocks.length - 1]?.end ??
-      null;
+      ends.length > 0 ? new Date(Math.max(...ends.map((d) => d.getTime()))) : null;
 
     if (windowStart && windowEndSlot) {
       const startSame =
@@ -204,8 +254,9 @@ export async function runSchedulerForUser(userId: string) {
       }
     }
 
+    // Only move incomplete blocks that are not the current in-progress slot.
     const openBlocks = existingBlocks.filter(
-      (b) => b.taskId === task.id && !b.completed
+      (b) => b.taskId === task.id && !b.completed && !stickyBlockIds.has(b.id)
     );
 
     for (let i = 0; i < placements.length; i++) {
