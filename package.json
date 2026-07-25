@@ -12,7 +12,8 @@
     "db:push": "npm run db:push -w @momentum/web",
     "db:migrate": "npm run db:migrate -w @momentum/web",
     "test": "npm run test -w @momentum/scheduler",
-    "lint": "npm run lint -w @momentum/web"
+    "lint": "npm run lint -w @momentum/web",
+    "tunnel": "npx --yes cloudflared tunnel --url http://localhost:3000"
   },
   "engines": {
     "node": ">=20"

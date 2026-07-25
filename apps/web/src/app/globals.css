@@ -345,6 +345,55 @@ select {
   max-width: none;
 }
 
+.settings-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 25;
+  display: flex;
+  gap: 0.35rem;
+  overflow-x: auto;
+  padding: 0.45rem 0.15rem;
+  margin: -0.15rem 0 0.15rem;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--line);
+}
+
+.settings-tab {
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-muted);
+  border-radius: 999px;
+  padding: 0.4rem 0.85rem;
+  font-size: 0.82rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.settings-tab[data-active="true"] {
+  color: var(--ink);
+  border-color: color-mix(in srgb, var(--brand) 45%, var(--line));
+  background: color-mix(in srgb, var(--brand) 12%, transparent);
+}
+
+.settings-section {
+  scroll-margin-top: 4.25rem;
+}
+
+.integration-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.7rem 0.15rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.integration-row:last-child {
+  border-bottom: none;
+}
+
 .cal-page-vertical {
   max-height: calc(100dvh - 5.5rem);
   overflow: hidden;

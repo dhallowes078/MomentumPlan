@@ -1,0 +1,18 @@
+/**
+ * Cloudflare Workers config for Momentum (OpenNext).
+ *
+ * Before first Workers deploy:
+ * 1. npx wrangler login
+ * 2. npm i -w @momentum/web @opennextjs/cloudflare wrangler
+ * 3. npx wrangler d1 create momentum  → paste database_id below
+ * 4. Wire Prisma D1 adapter (see ../../DEPLOY.md)
+ * 5. npm run deploy -w @momentum/web
+ *
+ * Until then, use `npm run tunnel` for a public Cloudflare URL against local SQLite.
+ */
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "momentum",
+  "compatibility_date": "2024-09-23",
+  "compatibility_flags": ["nodejs_compat"]
+}

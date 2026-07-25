@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { signOut } from "next-auth/react";
+import { signIn, signOut } from "next-auth/react";
+import { Check, Copy, RefreshCw } from "lucide-react";
 import { THEME_PRESETS } from "@/lib/theme";
 import { useThemePrefs } from "@/components/ThemeProvider";
 
@@ -52,9 +53,26 @@ type Profile = {
   imageUrl?: string | null;
 };
 
+type Integrations = {
+  microsoftAuthConfigured: boolean;
+  googleAuthConfigured: boolean;
+  outlookCalendar: { connected: boolean; updatedAt?: string };
+};
+
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const BUCKET_COLORS = ["#3D6B4F", "#2F5D8C", "#8B5E3C", "#7A2E3A", "#0F766E", "#6B4A2F", "#B7791F"];
 const PROFILE_COLORS = ["#3D6B4F", "#2F5D8C", "#8B5E3C", "#7A2E3A", "#0F766E", "#B7791F", "#6B4A2F", "#5B4B8A"];
+
+const TABS = [
+  { id: "profile", label: "Profile" },
+  { id: "devices", label: "Devices" },
+  { id: "appearance", label: "Appearance" },
+  { id: "sizes", label: "Sizes" },
+  { id: "schedule", label: "Schedule" },
+  { id: "workspace", label: "Workspace" },
+  { id: "integrations", label: "Integrations" },
+  { id: "phone", label: "Phone" },
+] as const;
 
 function minutesToInput(m: number) {
   const h = Math.floor(m / 60)
@@ -74,12 +92,17 @@ export default function SettingsPage() {
   const [prefs, setPrefs] = useState<Prefs | null>(null);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [integrations, setIntegrations] = useState<Integrations | null>(null);
   const [inviteEmail, setInviteEmail] = useState("");
   const [activeWs, setActiveWs] = useState("");
   const [bucketName, setBucketName] = useState("");
   const [bucketColor, setBucketColor] = useState(BUCKET_COLORS[0]);
   const [saved, setSaved] = useState(false);
   const [profileSaved, setProfileSaved] = useState(false);
+  const [accessCode, setAccessCode] = useState<string | null>(null);
+  const [accessDisplay, setAccessDisplay] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [activeTab, setActiveTab] = useState<string>("profile");
   const initialWs = useRef(false);
 
   const loadWorkspaceDetail = useCallback(async (wid: string) => {
@@ -90,14 +113,21 @@ export default function SettingsPage() {
   }, []);
 
   const load = useCallback(async () => {
-    const [p, w, me] = await Promise.all([
+    const [p, w, me, codeRes, integ] = await Promise.all([
       fetch("/api/prefs").then((r) => r.json()),
       fetch("/api/workspaces").then((r) => r.json()),
       fetch("/api/me").then((r) => r.json()),
+      fetch("/api/me/access-code").then((r) => r.json()),
+      fetch("/api/integrations").then((r) => r.json()),
     ]);
     setPrefs(p.prefs);
     setWorkspaces(w.workspaces);
     setProfile(me.user);
+    setIntegrations(integ);
+    if (codeRes.code) {
+      setAccessCode(codeRes.code);
+      setAccessDisplay(codeRes.display ?? codeRes.code);
+    }
     const wid = activeWs || w.workspaces[0]?.id;
     if (wid) {
       if (!activeWs) setActiveWs(wid);
@@ -115,6 +145,25 @@ export default function SettingsPage() {
     if (!activeWs || !initialWs.current) return;
     void loadWorkspaceDetail(activeWs);
   }, [activeWs, loadWorkspaceDetail]);
+
+  useEffect(() => {
+    const onScroll = () => {
+      let current = TABS[0].id;
+      for (const tab of TABS) {
+        const el = document.getElementById(`settings-${tab.id}`);
+        if (!el) continue;
+        if (el.getBoundingClientRect().top <= 120) current = tab.id;
+      }
+      setActiveTab(current);
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  function jumpTo(id: string) {
+    setActiveTab(id);
+    document.getElementById(`settings-${id}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 
   async function savePrefs(next?: Partial<Prefs>) {
     if (!prefs) return;
@@ -149,6 +198,28 @@ export default function SettingsPage() {
     setProfile(data.user);
     setProfileSaved(true);
     setTimeout(() => setProfileSaved(false), 1500);
+  }
+
+  async function copyCode() {
+    if (!accessCode) return;
+    await navigator.clipboard.writeText(accessCode);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1600);
+  }
+
+  async function regenerateCode() {
+    if (!confirm("Generate a new device code? The old code will stop working on other devices.")) {
+      return;
+    }
+    const res = await fetch("/api/me/access-code", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ regenerate: true }),
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    setAccessCode(data.code);
+    setAccessDisplay(data.display);
   }
 
   async function invite(e: React.FormEvent) {
@@ -202,6 +273,14 @@ export default function SettingsPage() {
 
   const current = workspaces.find((w) => w.id === activeWs);
 
+  const futureIntegrations = [
+    { name: "Google Calendar", detail: "Pull free/busy and create Momentum blocks." },
+    { name: "Apple Calendar", detail: "iCloud calendar sync via CalDAV." },
+    { name: "Todoist", detail: "Import tasks and push completed work back." },
+    { name: "Notion", detail: "Sync databases as Momentum task sources." },
+    { name: "Slack", detail: "Capture tasks from messages and reminders." },
+  ];
+
   return (
     <div className="page-wrap rise">
       <div>
@@ -215,12 +294,30 @@ export default function SettingsPage() {
           Settings
         </h1>
         <p style={{ margin: "0.35rem 0 0", color: "var(--ink-muted)" }}>
-          Profile, theme, size presets, work hours, and workspace sharing.
+          Profile, devices, theme, schedule, workspace, and integrations.
         </p>
       </div>
 
+      <nav className="settings-tabs" aria-label="Settings sections">
+        {TABS.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            className="settings-tab"
+            data-active={activeTab === tab.id ? "true" : "false"}
+            onClick={() => jumpTo(tab.id)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </nav>
+
       {profile && (
-        <section className="card" style={{ padding: "1rem", display: "grid", gap: "0.85rem" }}>
+        <section
+          id="settings-profile"
+          className="card settings-section"
+          style={{ padding: "1rem", display: "grid", gap: "0.85rem" }}
+        >
           <h2 style={{ margin: 0, fontSize: "1rem" }}>Your profile</h2>
           <div style={{ display: "flex", gap: "0.85rem", alignItems: "center" }}>
             <div
@@ -305,9 +402,54 @@ export default function SettingsPage() {
         </section>
       )}
 
+      <section
+        id="settings-devices"
+        className="card settings-section"
+        style={{ padding: "1rem", display: "grid", gap: "0.85rem" }}
+      >
+        <h2 style={{ margin: 0, fontSize: "1rem" }}>Devices & access code</h2>
+        <p style={{ margin: 0, color: "var(--ink-muted)", fontSize: "0.9rem" }}>
+          Copy this 6-digit code, then paste it on the login screen of another device to open the
+          same account and tasks.
+        </p>
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: "0.65rem",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          <div
+            style={{
+              fontFamily: "var(--font-display), serif",
+              fontSize: "2rem",
+              letterSpacing: "0.18em",
+              padding: "0.35rem 0.15rem",
+            }}
+          >
+            {accessDisplay ?? "······"}
+          </div>
+          <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
+            <button className="btn" type="button" onClick={() => void copyCode()} disabled={!accessCode}>
+              {copied ? <Check size={16} /> : <Copy size={16} />}
+              {copied ? "Copied" : "Copy"}
+            </button>
+            <button className="btn secondary" type="button" onClick={() => void regenerateCode()}>
+              <RefreshCw size={16} /> New code
+            </button>
+          </div>
+        </div>
+      </section>
+
       {prefs && (
         <>
-          <section className="card" style={{ padding: "1rem", display: "grid", gap: "0.85rem" }}>
+          <section
+            id="settings-appearance"
+            className="card settings-section"
+            style={{ padding: "1rem", display: "grid", gap: "0.85rem" }}
+          >
             <h2 style={{ margin: 0, fontSize: "1rem" }}>Appearance</h2>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "1rem" }}>
               <div>
@@ -349,7 +491,11 @@ export default function SettingsPage() {
             </div>
           </section>
 
-          <section className="card" style={{ padding: "1rem", display: "grid", gap: "0.75rem" }}>
+          <section
+            id="settings-sizes"
+            className="card settings-section"
+            style={{ padding: "1rem", display: "grid", gap: "0.75rem" }}
+          >
             <h2 style={{ margin: 0, fontSize: "1rem" }}>Job size presets</h2>
             <p style={{ margin: 0, color: "var(--ink-muted)", fontSize: "0.9rem" }}>
               Tiny / Small / Medium / Big estimate lengths used when creating tasks.
@@ -382,7 +528,8 @@ export default function SettingsPage() {
           </section>
 
           <form
-            className="card"
+            id="settings-schedule"
+            className="card settings-section"
             style={{ padding: "1rem", display: "grid", gap: "0.75rem" }}
             onSubmit={(e) => {
               e.preventDefault();
@@ -483,7 +630,11 @@ export default function SettingsPage() {
         </>
       )}
 
-      <section className="card" style={{ padding: "1rem", display: "grid", gap: "0.75rem" }}>
+      <section
+        id="settings-workspace"
+        className="card settings-section"
+        style={{ padding: "1rem", display: "grid", gap: "0.75rem" }}
+      >
         <h2 style={{ margin: 0, fontSize: "1rem" }}>Workspace & buckets</h2>
         <select className="field" value={activeWs} onChange={(e) => setActiveWs(e.target.value)}>
           {workspaces.map((w) => (
@@ -623,11 +774,88 @@ export default function SettingsPage() {
         )}
       </section>
 
-      <section className="card" style={{ padding: "1rem" }}>
+      <section
+        id="settings-integrations"
+        className="card settings-section"
+        style={{ padding: "1rem", display: "grid", gap: "0.85rem" }}
+      >
+        <h2 style={{ margin: 0, fontSize: "1rem" }}>Integrations</h2>
+        <p style={{ margin: 0, color: "var(--ink-muted)", fontSize: "0.9rem" }}>
+          Sign-in providers and calendar apps. Ready ones connect now; others are staged for later.
+        </p>
+
+        <div style={{ display: "grid", gap: "0.55rem" }}>
+          <div className="integration-row">
+            <div>
+              <strong>Microsoft</strong>
+              <div style={{ fontSize: "0.85rem", color: "var(--ink-muted)" }}>
+                Sign in + Outlook calendar via Microsoft Graph.
+              </div>
+            </div>
+            {integrations?.microsoftAuthConfigured ? (
+              <button
+                className="btn secondary"
+                type="button"
+                onClick={() => void signIn("microsoft-entra-id", { callbackUrl: "/settings" })}
+              >
+                {integrations.outlookCalendar.connected ? "Reconnect" : "Connect"}
+              </button>
+            ) : (
+              <span className="badge">Add AUTH_MICROSOFT_* env</span>
+            )}
+          </div>
+
+          <div className="integration-row">
+            <div>
+              <strong>Google</strong>
+              <div style={{ fontSize: "0.85rem", color: "var(--ink-muted)" }}>
+                Sign in with Google (Calendar sync coming next).
+              </div>
+            </div>
+            {integrations?.googleAuthConfigured ? (
+              <button
+                className="btn secondary"
+                type="button"
+                onClick={() => void signIn("google", { callbackUrl: "/settings" })}
+              >
+                Connect
+              </button>
+            ) : (
+              <span className="badge">Coming soon</span>
+            )}
+          </div>
+
+          <div className="integration-row">
+            <div>
+              <strong>Outlook Calendar</strong>
+              <div style={{ fontSize: "0.85rem", color: "var(--ink-muted)" }}>
+                {integrations?.outlookCalendar.connected
+                  ? "Connected — free/busy used when packing your day."
+                  : "Uses your Microsoft account when connected."}
+              </div>
+            </div>
+            <span className="badge">
+              {integrations?.outlookCalendar.connected ? "Connected" : "Not connected"}
+            </span>
+          </div>
+
+          {futureIntegrations.map((item) => (
+            <div key={item.name} className="integration-row">
+              <div>
+                <strong>{item.name}</strong>
+                <div style={{ fontSize: "0.85rem", color: "var(--ink-muted)" }}>{item.detail}</div>
+              </div>
+              <span className="badge">Coming soon</span>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section id="settings-phone" className="card settings-section" style={{ padding: "1rem" }}>
         <h2 style={{ margin: "0 0 0.5rem", fontSize: "1rem" }}>Phone / PWA</h2>
         <p style={{ margin: 0, color: "var(--ink-muted)", fontSize: "0.9rem" }}>
           On your phone, open this site in Safari/Chrome and use “Add to Home Screen” for the
-          Momentum portal.
+          Momentum portal. Use your device code from the Devices tab to sign in.
         </p>
       </section>
 

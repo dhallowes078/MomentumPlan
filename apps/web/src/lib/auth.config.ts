@@ -1,5 +1,6 @@
 import type { NextAuthConfig } from "next-auth";
 import Credentials from "next-auth/providers/credentials";
+import Google from "next-auth/providers/google";
 import MicrosoftEntraID from "next-auth/providers/microsoft-entra-id";
 
 const scopes = [
@@ -14,6 +15,10 @@ const scopes = [
 const microsoftConfigured = Boolean(
   process.env.AUTH_MICROSOFT_ENTRA_ID_ID &&
     process.env.AUTH_MICROSOFT_ENTRA_ID_SECRET
+);
+
+const googleConfigured = Boolean(
+  process.env.AUTH_GOOGLE_ID && process.env.AUTH_GOOGLE_SECRET
 );
 
 export const authConfig = {
@@ -43,6 +48,15 @@ export const authConfig = {
                 scope: scopes,
               },
             },
+            allowDangerousEmailAccountLinking: true,
+          }),
+        ]
+      : []),
+    ...(googleConfigured
+      ? [
+          Google({
+            clientId: process.env.AUTH_GOOGLE_ID!,
+            clientSecret: process.env.AUTH_GOOGLE_SECRET!,
             allowDangerousEmailAccountLinking: true,
           }),
         ]

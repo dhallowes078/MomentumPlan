@@ -1,10 +1,14 @@
 import { signIn } from "@/lib/auth";
+import { DeviceCodeLogin } from "@/components/DeviceCodeLogin";
 
 export default function LoginPage() {
   const localLoginEnabled = process.env.AUTH_ALLOW_LOCAL_LOGIN === "true";
   const microsoftLoginEnabled = Boolean(
     process.env.AUTH_MICROSOFT_ENTRA_ID_ID &&
       process.env.AUTH_MICROSOFT_ENTRA_ID_SECRET
+  );
+  const googleLoginEnabled = Boolean(
+    process.env.AUTH_GOOGLE_ID && process.env.AUTH_GOOGLE_SECRET
   );
 
   return (
@@ -47,7 +51,7 @@ export default function LoginPage() {
             Momentum
           </p>
           <p style={{ color: "var(--ink-muted)", marginTop: "0.75rem", lineHeight: 1.5 }}>
-            Priority tasks, time estimates, and Outlook free time — auto-packed into a day that
+            Priority tasks, time estimates, and calendar free time — auto-packed into a day that
             reshuffles when life moves.
           </p>
           <div style={{ display: "grid", gap: "0.75rem", marginTop: "1.75rem" }}>
@@ -75,11 +79,38 @@ export default function LoginPage() {
                 </button>
               </form>
             )}
+            {googleLoginEnabled && (
+              <form
+                action={async () => {
+                  "use server";
+                  await signIn("google", { redirectTo: "/today" });
+                }}
+              >
+                <button className="btn" type="submit" style={{ width: "100%" }}>
+                  Continue with Google
+                </button>
+              </form>
+            )}
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr auto 1fr",
+                alignItems: "center",
+                gap: "0.65rem",
+                margin: "0.25rem 0",
+              }}
+            >
+              <div style={{ height: 1, background: "var(--line)" }} />
+              <span style={{ fontSize: "0.75rem", color: "var(--ink-muted)" }}>or</span>
+              <div style={{ height: 1, background: "var(--line)" }} />
+            </div>
+
+            <DeviceCodeLogin />
           </div>
           <p style={{ fontSize: "0.8rem", color: "var(--ink-muted)", marginTop: "1rem" }}>
-            {localLoginEnabled
-              ? "Local mode stores your data on this device. Connect Microsoft later for Outlook calendar sync."
-              : "Uses Microsoft Graph for calendar read/write. Personal and work accounts supported."}
+            Paste the 6-digit code from Settings on another device to open the same account and
+            data.
           </p>
         </div>
       </div>
