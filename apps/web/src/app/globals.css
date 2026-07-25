@@ -410,13 +410,14 @@ select {
 }
 
 .cal-horizontal-scroll {
-  overflow-x: auto;
+  overflow-x: hidden;
   overflow-y: hidden;
 }
 
 .cal-horizontal-track {
   position: relative;
-  height: 92px;
+  width: 100%;
+  min-height: 92px;
 }
 
 .cal-horizontal-hour {
@@ -431,13 +432,46 @@ select {
 .cal-horizontal-break,
 .cal-horizontal-item {
   position: absolute;
-  top: 1.35rem;
-  height: 64px;
   border-radius: 10px;
   padding: 0.35rem 0.5rem;
   font-size: 0.82rem;
   overflow: hidden;
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.1rem;
+}
+
+.cal-horizontal-item.is-short {
+  font-size: 0.75rem;
+  padding: 0.3rem 0.4rem;
+}
+
+.cal-item-time {
+  color: var(--ink-muted);
+  font-size: 0.7rem;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.cal-item-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  line-height: 1.25;
+  word-break: break-word;
+}
+
+.cal-horizontal-item.is-short .cal-item-title {
+  -webkit-line-clamp: 3;
+  font-weight: 600;
+}
+
+.cal-vertical-item .cal-item-title {
+  -webkit-line-clamp: 3;
 }
 
 .cal-horizontal-break {

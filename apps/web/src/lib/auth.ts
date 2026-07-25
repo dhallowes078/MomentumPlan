@@ -1,10 +1,13 @@
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import { PrismaAdapter } from "@auth/prisma-adapter";
+import { randomUUID } from "crypto";
 import { prisma } from "@/lib/db";
 import { ensurePersonalWorkspace } from "@/lib/workspace";
 import { authConfig } from "@/lib/auth.config";
 import { ensureAccessCode, normalizeAccessCode } from "@/lib/access-code";
+
+const localLoginEnabled = process.env.AUTH_ALLOW_LOCAL_LOGIN === "true";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
@@ -12,6 +15,34 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   session: { strategy: "jwt" },
   providers: [
     ...authConfig.providers,
+    ...(localLoginEnabled
+      ? [
+          Credentials({
+            id: "local",
+            name: "New local account",
+            credentials: {},
+            async authorize() {
+              // Every "Start fresh" click gets its own isolated user + workspace + code.
+              const id = `local-${randomUUID()}`;
+              const email = `${id}@momentum.local`;
+              const user = await prisma.user.create({
+                data: {
+                  id,
+                  name: "Local User",
+                  email,
+                },
+              });
+              await ensurePersonalWorkspace(user.id, user.name ?? "Local User");
+              await ensureAccessCode(user.id);
+              return {
+                id: user.id,
+                name: user.name,
+                email: user.email,
+              };
+            },
+          }),
+        ]
+      : []),
     Credentials({
       id: "device-code",
       name: "Device code",
@@ -71,20 +102,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     },
     async signIn({ user, account }) {
       if (user.id && account?.provider === "local") {
-        const localUser = await prisma.user.upsert({
-          where: { id: user.id },
-          create: {
-            id: user.id,
-            name: user.name ?? "Local User",
-            email: user.email ?? "local@momentum.test",
-          },
-          update: {},
-        });
-        await ensurePersonalWorkspace(
-          localUser.id,
-          localUser.name ?? localUser.email
-        );
-        await ensureAccessCode(localUser.id).catch(console.error);
+        // User row is created in authorize(); just ensure workspace/code exist.
+        await ensurePersonalWorkspace(user.id, user.name ?? user.email ?? "Local User");
+        await ensureAccessCode(user.id).catch(console.error);
       }
 
       if (user.id && (account?.provider === "device-code" || account?.provider === "google")) {

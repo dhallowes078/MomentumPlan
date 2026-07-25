@@ -63,7 +63,7 @@ export default function LoginPage() {
                 }}
               >
                 <button className="btn" type="submit" style={{ width: "100%" }}>
-                  Continue locally
+                  Start a new account
                 </button>
               </form>
             )}
@@ -109,8 +109,9 @@ export default function LoginPage() {
             <DeviceCodeLogin />
           </div>
           <p style={{ fontSize: "0.8rem", color: "var(--ink-muted)", marginTop: "1rem" }}>
-            Paste the 6-digit code from Settings on another device to open the same account and
-            data.
+            <strong>Start a new account</strong> creates a blank workspace with its own 6-digit
+            code. Paste a code from Settings only when you want to open an existing account — don’t
+            share that code if you don’t want others editing your plan.
           </p>
         </div>
       </div>

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { addDays, format, startOfDay } from "date-fns";
 import { RefreshCw } from "lucide-react";
-import { formatTime, priorityColor } from "@/lib/format";
+import { priorityColor } from "@/lib/format";
 
 type CalData = {
   blocks: Array<{
@@ -29,8 +29,41 @@ type CalData = {
   outlookConnected: boolean;
 };
 
+type TimedItem = {
+  id: string;
+  startMin: number;
+  endMin: number;
+  kind: "meeting" | "task" | "break";
+  title: string;
+  href?: string;
+  color?: string;
+};
+
+/** Pack true time-overlaps into lanes. Sequential tasks stay on one row. */
+function assignLanes(items: TimedItem[]): { item: TimedItem; lane: number }[] {
+  const sorted = [...items].sort(
+    (a, b) => a.startMin - b.startMin || b.endMin - a.endMin
+  );
+  const laneEnds: number[] = [];
+  return sorted.map((item) => {
+    let lane = laneEnds.findIndex((end) => end <= item.startMin);
+    if (lane === -1) {
+      lane = laneEnds.length;
+      laneEnds.push(item.endMin);
+    } else {
+      laneEnds[lane] = item.endMin;
+    }
+    return { item, lane };
+  });
+}
+
 function minutesToOffset(minutes: number, dayStart: number, pxPerMin: number) {
   return (minutes - dayStart) * pxPerMin;
+}
+
+/** Position within the work-hours track as a % of the day span. */
+function workHourPercent(minutes: number, dayStart: number, daySpan: number) {
+  return ((minutes - dayStart) / daySpan) * 100;
 }
 
 function clockMinutes(iso: string) {
@@ -122,7 +155,8 @@ export default function CalendarPage() {
   const daySpan = Math.max(endMinutes - startMinutes, 60);
   // Fit vertical timeline in the viewport so the page itself doesn't scroll.
   const verticalPxPerMin = Math.max(0.55, Math.min(1.25, (viewportH - 210) / daySpan));
-  const horizontalPxPerMin = 2.2;
+  const horizontalLaneHeight = 56;
+  const horizontalLaneGap = 6;
   const hours = Array.from(
     { length: Math.ceil(daySpan / 60) + 1 },
     (_, i) => startMinutes + i * 60
@@ -146,6 +180,51 @@ export default function CalendarPage() {
     return { meetings, blocks };
   }
 
+  /** Only items that intersect the configured work-hours window. */
+  function dayTimelineItems(
+    meetings: CalData["meetings"],
+    blocks: CalData["blocks"]
+  ): TimedItem[] {
+    const items: TimedItem[] = [];
+    const pushClipped = (item: TimedItem) => {
+      const startMin = Math.max(item.startMin, startMinutes);
+      const endMin = Math.min(item.endMin, endMinutes);
+      if (endMin <= startMin) return;
+      items.push({ ...item, startMin, endMin });
+    };
+
+    if (breakStart != null && breakEnd != null && breakEnd > breakStart) {
+      pushClipped({
+        id: "break",
+        startMin: breakStart,
+        endMin: breakEnd,
+        kind: "break",
+        title: "Break",
+      });
+    }
+    for (const m of meetings) {
+      pushClipped({
+        id: m.id,
+        startMin: clockMinutes(m.start),
+        endMin: Math.max(clockMinutes(m.end), clockMinutes(m.start) + 15),
+        kind: "meeting",
+        title: m.subject,
+      });
+    }
+    for (const b of blocks) {
+      pushClipped({
+        id: b.id,
+        startMin: clockMinutes(b.start),
+        endMin: Math.max(clockMinutes(b.end), clockMinutes(b.start) + 15),
+        kind: "task",
+        title: b.task.title,
+        href: `/tasks/${b.task.id}`,
+        color: b.task.bucket?.color ?? priorityColor(b.task.priority),
+      });
+    }
+    return items;
+  }
+
   return (
     <div className={`page-wrap wide rise ${view === "vertical" ? "cal-page-vertical" : ""}`}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: "1rem", alignItems: "end" }}>
@@ -160,7 +239,7 @@ export default function CalendarPage() {
             Calendar
           </h1>
           <p style={{ margin: "0.35rem 0 0", color: "var(--ink-muted)" }}>
-            Working days from today · breaks shown from your schedule settings.
+            Each day shows your work hours only · tasks stack only when times truly overlap.
           </p>
         </div>
         <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
@@ -207,7 +286,14 @@ export default function CalendarPage() {
           {days.map((day) => {
             const { meetings, blocks } = dayContent(day);
             const isToday = startOfDay(day).getTime() === today.getTime();
-            const trackWidth = daySpan * horizontalPxPerMin;
+            const laidOut = assignLanes(dayTimelineItems(meetings, blocks));
+            const laneCount = Math.max(1, ...laidOut.map((x) => x.lane + 1), 1);
+            const trackHeight = 28 + laneCount * (horizontalLaneHeight + horizontalLaneGap);
+            const workLabel = `${String(Math.floor(startMinutes / 60)).padStart(2, "0")}:${String(
+              startMinutes % 60
+            ).padStart(2, "0")}–${String(Math.floor(endMinutes / 60)).padStart(2, "0")}:${String(
+              endMinutes % 60
+            ).padStart(2, "0")}`;
             return (
               <div
                 key={day.toISOString()}
@@ -218,17 +304,25 @@ export default function CalendarPage() {
                   outline: isToday ? "2px solid color-mix(in srgb, var(--brand) 35%, transparent)" : undefined,
                 }}
               >
-                <div style={{ display: "flex", justifyContent: "space-between", gap: "0.5rem" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: "0.5rem", alignItems: "center" }}>
                   <strong>{format(day, "EEE d MMM")}</strong>
-                  {isToday && <span className="badge">Today</span>}
+                  <div style={{ display: "flex", gap: "0.35rem", alignItems: "center" }}>
+                    <span className="badge" style={{ fontWeight: 500 }}>
+                      {workLabel}
+                    </span>
+                    {isToday && <span className="badge">Today</span>}
+                  </div>
                 </div>
                 <div className="cal-horizontal-scroll">
-                  <div className="cal-horizontal-track" style={{ width: trackWidth, minWidth: "100%" }}>
+                  <div
+                    className="cal-horizontal-track"
+                    style={{ width: "100%", height: trackHeight }}
+                  >
                     {hours.map((m) => (
                       <div
                         key={m}
                         className="cal-horizontal-hour"
-                        style={{ left: minutesToOffset(m, startMinutes, horizontalPxPerMin) }}
+                        style={{ left: `${workHourPercent(m, startMinutes, daySpan)}%` }}
                       >
                         {String(Math.floor(m / 60)).padStart(2, "0")}:
                         {String(m % 60).padStart(2, "0")}
@@ -237,74 +331,72 @@ export default function CalendarPage() {
                     {isToday && showNowLine && (
                       <div
                         className="cal-now-line-h"
-                        style={{ left: minutesToOffset(nowMinutes, startMinutes, horizontalPxPerMin) }}
+                        style={{ left: `${workHourPercent(nowMinutes, startMinutes, daySpan)}%` }}
                         title="Now"
                       >
                         <span className="cal-now-dot" />
                       </div>
                     )}
-                    {breakStart != null &&
-                      breakEnd != null &&
-                      breakEnd > breakStart && (
-                        <div
-                          className="cal-horizontal-break"
-                          style={{
-                            left: minutesToOffset(breakStart, startMinutes, horizontalPxPerMin),
-                            width: Math.max((breakEnd - breakStart) * horizontalPxPerMin, 36),
-                          }}
-                        >
-                          Break
-                        </div>
-                      )}
-                    {meetings.map((m) => {
-                      const startMin = clockMinutes(m.start);
-                      const endMin = clockMinutes(m.end);
-                      return (
-                        <div
-                          key={m.id}
-                          className="cal-horizontal-item meeting"
-                          style={{
-                            left: minutesToOffset(startMin, startMinutes, horizontalPxPerMin),
-                            width: Math.max((endMin - startMin) * horizontalPxPerMin, 72),
-                          }}
-                          title={m.subject}
-                        >
-                          <div style={{ color: "var(--ink-muted)", fontSize: "0.72rem" }}>
-                            {formatTime(m.start)}–{formatTime(m.end)}
+                    {laidOut.map(({ item, lane }) => {
+                      const topRem = `${1.55 + lane * ((horizontalLaneHeight + horizontalLaneGap) / 16)}rem`;
+                      const heightRem = `${horizontalLaneHeight / 16}rem`;
+                      const widthPct = workHourPercent(item.endMin, startMinutes, daySpan) -
+                        workHourPercent(item.startMin, startMinutes, daySpan);
+                      const short = widthPct < 8;
+                      const common = {
+                        left: `${workHourPercent(item.startMin, startMinutes, daySpan)}%`,
+                        width: `${Math.max(widthPct, 0.8)}%`,
+                        top: topRem,
+                        height: heightRem,
+                        ...(item.kind === "task" && item.color
+                          ? { borderLeft: `3px solid ${item.color}` }
+                          : {}),
+                      } as React.CSSProperties;
+
+                      const timeLabel = `${String(Math.floor(item.startMin / 60)).padStart(2, "0")}:${String(
+                        item.startMin % 60
+                      ).padStart(2, "0")}–${String(Math.floor(item.endMin / 60)).padStart(2, "0")}:${String(
+                        item.endMin % 60
+                      ).padStart(2, "0")}`;
+
+                      if (item.kind === "break") {
+                        return (
+                          <div key={item.id} className="cal-horizontal-break" style={common} title={timeLabel}>
+                            Break
                           </div>
-                          {m.subject}
-                        </div>
-                      );
-                    })}
-                    {blocks.map((b) => {
-                      const startMin = clockMinutes(b.start);
-                      const endMin = clockMinutes(b.end);
+                        );
+                      }
+                      if (item.kind === "meeting") {
+                        return (
+                          <div
+                            key={item.id}
+                            className={`cal-horizontal-item meeting${short ? " is-short" : ""}`}
+                            style={common}
+                            title={`${item.title} · ${timeLabel}`}
+                          >
+                            {!short && <div className="cal-item-time">{timeLabel}</div>}
+                            <div className="cal-item-title">{item.title}</div>
+                          </div>
+                        );
+                      }
                       return (
                         <Link
-                          key={b.id}
-                          href={`/tasks/${b.task.id}`}
-                          className="cal-horizontal-item task"
-                          style={{
-                            left: minutesToOffset(startMin, startMinutes, horizontalPxPerMin),
-                            width: Math.max((endMin - startMin) * horizontalPxPerMin, 72),
-                            borderLeft: `3px solid ${b.task.bucket?.color ?? priorityColor(b.task.priority)}`,
-                          }}
-                          title={b.task.title}
+                          key={item.id}
+                          href={item.href!}
+                          className={`cal-horizontal-item task${short ? " is-short" : ""}`}
+                          style={common}
+                          title={`${item.title} · ${timeLabel}`}
                         >
-                          <div style={{ color: "var(--ink-muted)", fontSize: "0.72rem" }}>
-                            {formatTime(b.start)}–{formatTime(b.end)}
-                          </div>
-                          {b.task.title}
+                          {!short && <div className="cal-item-time">{timeLabel}</div>}
+                          <div className="cal-item-title">{item.title}</div>
                         </Link>
                       );
                     })}
-                    {meetings.length === 0 &&
-                      blocks.length === 0 &&
-                      !(breakStart != null && breakEnd != null) && (
-                        <div style={{ color: "var(--ink-muted)", fontSize: "0.85rem", paddingTop: "1.6rem" }}>
-                          Open day
-                        </div>
-                      )}
+                    {laidOut.length === 0 && (
+                      <div style={{ color: "var(--ink-muted)", fontSize: "0.85rem", paddingTop: "1.6rem" }}>
+                        Open day
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -316,6 +408,9 @@ export default function CalendarPage() {
           {days.map((day) => {
             const { meetings, blocks } = dayContent(day);
             const isToday = startOfDay(day).getTime() === today.getTime();
+            const verticalItems = dayTimelineItems(meetings, blocks);
+            const laidOut = assignLanes(verticalItems);
+            const laneCount = Math.max(1, ...laidOut.map((x) => x.lane + 1), 1);
             return (
               <div
                 key={day.toISOString()}
@@ -350,65 +445,67 @@ export default function CalendarPage() {
                       <span className="cal-now-label">Now</span>
                     </div>
                   )}
-                  {breakStart != null &&
-                    breakEnd != null &&
-                    breakEnd > breakStart && (
-                      <div
-                        className="cal-break"
-                        style={{
-                          top: minutesToOffset(breakStart, startMinutes, verticalPxPerMin),
-                          height: Math.max((breakEnd - breakStart) * verticalPxPerMin, 18),
-                        }}
-                      >
-                        Break
-                      </div>
-                    )}
-                  {meetings.map((m) => {
-                    const startMin = clockMinutes(m.start);
-                    const endMin = clockMinutes(m.end);
-                    return (
-                      <div
-                        key={m.id}
-                        style={{
-                          position: "absolute",
-                          left: 44,
-                          right: 6,
-                          top: minutesToOffset(startMin, startMinutes, verticalPxPerMin),
-                          height: Math.max((endMin - startMin) * verticalPxPerMin, 22),
-                          borderRadius: 8,
-                          background: "color-mix(in srgb, var(--ink) 8%, transparent)",
-                          fontSize: "0.72rem",
-                          padding: "0.25rem 0.4rem",
-                          overflow: "hidden",
-                        }}
-                      >
-                        {m.subject}
-                      </div>
+                  {laidOut.map(({ item, lane }) => {
+                    const top = minutesToOffset(item.startMin, startMinutes, verticalPxPerMin);
+                    const height = Math.max(
+                      (item.endMin - item.startMin) * verticalPxPerMin,
+                      22
                     );
-                  })}
-                  {blocks.map((b) => {
-                    const startMin = clockMinutes(b.start);
-                    const endMin = clockMinutes(b.end);
+                    const gutter = 44;
+                    const gap = 3;
+                    const usable = `calc(100% - ${gutter}px - ${(laneCount - 1) * gap}px)`;
+                    const style: React.CSSProperties = {
+                      position: "absolute",
+                      top,
+                      height,
+                      left: `calc(${gutter}px + (${usable}) * ${lane} / ${laneCount} + ${lane * gap}px)`,
+                      width: `calc((${usable}) / ${laneCount})`,
+                      borderRadius: 8,
+                      fontSize: height < 28 ? "0.68rem" : "0.72rem",
+                      padding: "0.2rem 0.35rem",
+                      overflow: "hidden",
+                      lineHeight: 1.25,
+                      zIndex: 2 + lane,
+                      ...(item.kind === "break"
+                        ? {
+                            background: "color-mix(in srgb, var(--ink-muted) 12%, transparent)",
+                            border: "1px dashed var(--line)",
+                            color: "var(--ink-muted)",
+                            display: "grid",
+                            placeItems: "center",
+                          }
+                        : item.kind === "meeting"
+                          ? { background: "color-mix(in srgb, var(--ink) 8%, transparent)" }
+                          : {
+                              background: "color-mix(in srgb, var(--brand) 16%, transparent)",
+                              borderLeft: `3px solid ${item.color ?? "var(--brand)"}`,
+                            }),
+                    };
+
+                    const label =
+                      height < 28
+                        ? item.title
+                        : `${String(Math.floor(item.startMin / 60)).padStart(2, "0")}:${String(
+                            item.startMin % 60
+                          ).padStart(2, "0")} ${item.title}`;
+
+                    if (item.kind === "task") {
+                      return (
+                        <Link
+                          key={item.id}
+                          href={item.href!}
+                          className="cal-vertical-item"
+                          style={style}
+                          title={item.title}
+                        >
+                          <span className="cal-item-title">{label}</span>
+                        </Link>
+                      );
+                    }
                     return (
-                      <Link
-                        key={b.id}
-                        href={`/tasks/${b.task.id}`}
-                        style={{
-                          position: "absolute",
-                          left: 44,
-                          right: 6,
-                          top: minutesToOffset(startMin, startMinutes, verticalPxPerMin),
-                          height: Math.max((endMin - startMin) * verticalPxPerMin, 22),
-                          borderRadius: 8,
-                          background: "color-mix(in srgb, var(--brand) 16%, transparent)",
-                          borderLeft: `3px solid ${b.task.bucket?.color ?? priorityColor(b.task.priority)}`,
-                          fontSize: "0.72rem",
-                          padding: "0.25rem 0.4rem",
-                          overflow: "hidden",
-                        }}
-                      >
-                        {b.task.title}
-                      </Link>
+                      <div key={item.id} className="cal-vertical-item" style={style} title={item.title}>
+                        <span className="cal-item-title">{item.kind === "break" ? "Break" : label}</span>
+                      </div>
                     );
                   })}
                 </div>

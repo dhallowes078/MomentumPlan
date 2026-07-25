@@ -12,6 +12,8 @@ export type SchedulableTask = {
   lockedStart?: Date | null;
   lockedEnd?: Date | null;
   allowSplit?: boolean;
+  /** Manual agenda order from drag-reorder (lower = earlier). */
+  position?: number;
   createdAt: Date;
 };
 
@@ -46,6 +48,8 @@ export type ScheduleResult = {
 };
 
 const MS_PER_MIN = 60_000;
+/** All task placements snap to :00 / :15 / :30 / :45. */
+export const SCHEDULE_GRID_MINUTES = 15;
 
 function startOfDay(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
@@ -64,6 +68,34 @@ function minutesSinceMidnight(d: Date): number {
 function atMinutes(day: Date, minutes: number): Date {
   const x = startOfDay(day);
   x.setMinutes(minutes);
+  return x;
+}
+
+/** Round a duration up to the next 15-minute step (minimum one step). */
+export function roundUpToGrid(minutes: number, grid = SCHEDULE_GRID_MINUTES): number {
+  const safe = Math.max(grid, minutes);
+  return Math.ceil(safe / grid) * grid;
+}
+
+/** Snap a wall-clock time up to the next :00/:15/:30/:45. */
+export function ceilToGrid(d: Date, grid = SCHEDULE_GRID_MINUTES): Date {
+  const x = new Date(d);
+  x.setSeconds(0, 0);
+  const mins = x.getHours() * 60 + x.getMinutes();
+  const rem = mins % grid;
+  if (rem === 0) return x;
+  x.setMinutes(x.getMinutes() + (grid - rem));
+  return x;
+}
+
+/** Snap a wall-clock time down to :00/:15/:30/:45. */
+export function floorToGrid(d: Date, grid = SCHEDULE_GRID_MINUTES): Date {
+  const x = new Date(d);
+  x.setSeconds(0, 0);
+  const mins = x.getHours() * 60 + x.getMinutes();
+  const rem = mins % grid;
+  if (rem === 0) return x;
+  x.setMinutes(x.getMinutes() - rem);
   return x;
 }
 
@@ -164,6 +196,10 @@ export function freeSlots(
 function sortTasks(tasks: SchedulableTask[]): SchedulableTask[] {
   return [...tasks].sort((a, b) => {
     if (b.priority !== a.priority) return b.priority - a.priority;
+    // Preserve manual agenda drag order within the same priority.
+    const aPos = a.position ?? Number.MAX_SAFE_INTEGER;
+    const bPos = b.position ?? Number.MAX_SAFE_INTEGER;
+    if (aPos !== bPos) return aPos - bPos;
     const aDue = a.dueAt?.getTime() ?? Number.POSITIVE_INFINITY;
     const bDue = b.dueAt?.getTime() ?? Number.POSITIVE_INFINITY;
     if (aDue !== bDue) return aDue - bDue;
@@ -177,16 +213,18 @@ function takeFromSlots(
   minChunk: number,
   allowSplit: boolean
 ): { placements: BusyBlock[]; remainingSlots: BusyBlock[] } | null {
-  const neededMs = neededMinutes * MS_PER_MIN;
-  const minMs = minChunk * MS_PER_MIN;
+  const grid = SCHEDULE_GRID_MINUTES;
+  const neededMs = roundUpToGrid(neededMinutes, grid) * MS_PER_MIN;
+  const minMs = roundUpToGrid(Math.max(minChunk, grid), grid) * MS_PER_MIN;
   const remaining = slots.map((s) => ({ ...s }));
 
   if (!allowSplit) {
     for (let i = 0; i < remaining.length; i++) {
       const s = remaining[i];
-      const dur = s.end.getTime() - s.start.getTime();
+      const start = ceilToGrid(s.start, grid);
+      if (start >= s.end) continue;
+      const dur = s.end.getTime() - start.getTime();
       if (dur >= neededMs) {
-        const start = s.start;
         const end = new Date(start.getTime() + neededMs);
         const next = [...remaining];
         if (end.getTime() < s.end.getTime()) {
@@ -200,7 +238,7 @@ function takeFromSlots(
     return null;
   }
 
-  // Split across slots
+  // Split across slots, always starting on a 15-minute mark.
   let left = neededMs;
   const placements: BusyBlock[] = [];
   const next: BusyBlock[] = [];
@@ -210,17 +248,26 @@ function takeFromSlots(
       next.push(s);
       continue;
     }
-    const dur = s.end.getTime() - s.start.getTime();
+    const start = ceilToGrid(s.start, grid);
+    if (start >= s.end) {
+      next.push(s);
+      continue;
+    }
+    const dur = s.end.getTime() - start.getTime();
     if (dur < minMs && left > dur) {
       next.push(s);
       continue;
     }
-    const take = Math.min(dur, left);
+    const takeRaw = Math.min(dur, left);
+    const take = Math.floor(takeRaw / (grid * MS_PER_MIN)) * (grid * MS_PER_MIN);
     if (take < minMs && take < left) {
       next.push(s);
       continue;
     }
-    const start = s.start;
+    if (take <= 0) {
+      next.push(s);
+      continue;
+    }
     const end = new Date(start.getTime() + take);
     placements.push({ start, end });
     left -= take;
@@ -244,7 +291,9 @@ export function packSchedule(
   prefs: SchedulerPrefs
 ): ScheduleResult {
   const planningEnd = addDays(now, prefs.planningDays);
-  let slots = freeSlots(now, planningEnd, busy, prefs);
+  // Start packing from the next 15-minute mark so nothing lands off-grid.
+  const packFrom = ceilToGrid(now);
+  let slots = freeSlots(packFrom, planningEnd, busy, prefs);
 
   const placements: Placement[] = [];
   const unplaced: ScheduleResult["unplaced"] = [];
@@ -263,7 +312,7 @@ export function packSchedule(
     }
   }
   if (lockedBusy.length) {
-    slots = freeSlots(now, planningEnd, [...busy, ...lockedBusy], prefs);
+    slots = freeSlots(packFrom, planningEnd, [...busy, ...lockedBusy], prefs);
   }
 
   const candidates = sortTasks(
@@ -314,6 +363,6 @@ export const DEFAULT_PREFS: SchedulerPrefs = {
     breakEndMinutes: 13 * 60,
   },
   planningDays: 14,
-  minChunkMinutes: 25,
-  bufferMinutes: 5,
+  minChunkMinutes: 15,
+  bufferMinutes: 0,
 };

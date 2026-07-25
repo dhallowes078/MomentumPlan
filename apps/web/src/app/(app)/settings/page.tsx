@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { signIn, signOut } from "next-auth/react";
-import { Check, Copy, RefreshCw } from "lucide-react";
+import { Check, Copy, FlaskConical, RefreshCw, Trash2 } from "lucide-react";
 import { THEME_PRESETS } from "@/lib/theme";
 import { useThemePrefs } from "@/components/ThemeProvider";
 
@@ -71,6 +71,7 @@ const TABS = [
   { id: "schedule", label: "Schedule" },
   { id: "workspace", label: "Workspace" },
   { id: "integrations", label: "Integrations" },
+  { id: "test-mode", label: "Test Mode" },
   { id: "phone", label: "Phone" },
 ] as const;
 
@@ -103,6 +104,8 @@ export default function SettingsPage() {
   const [accessDisplay, setAccessDisplay] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [activeTab, setActiveTab] = useState<string>("profile");
+  const [testMode, setTestMode] = useState({ active: false, count: 0 });
+  const [testModeBusy, setTestModeBusy] = useState(false);
   const initialWs = useRef(false);
 
   const loadWorkspaceDetail = useCallback(async (wid: string) => {
@@ -144,11 +147,19 @@ export default function SettingsPage() {
   useEffect(() => {
     if (!activeWs || !initialWs.current) return;
     void loadWorkspaceDetail(activeWs);
+    void fetch(`/api/test-mode?workspaceId=${encodeURIComponent(activeWs)}`)
+      .then((r) => r.json())
+      .then((data) =>
+        setTestMode({
+          active: Boolean(data.active),
+          count: Number(data.count ?? 0),
+        })
+      );
   }, [activeWs, loadWorkspaceDetail]);
 
   useEffect(() => {
     const onScroll = () => {
-      let current = TABS[0].id;
+      let current: string = TABS[0].id;
       for (const tab of TABS) {
         const el = document.getElementById(`settings-${tab.id}`);
         if (!el) continue;
@@ -269,6 +280,38 @@ export default function SettingsPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ color }),
     });
+  }
+
+  async function enableTestMode() {
+    if (!activeWs || testModeBusy) return;
+    setTestModeBusy(true);
+    const res = await fetch("/api/test-mode", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workspaceId: activeWs }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      setTestMode({ active: true, count: Number(data.count ?? 0) });
+      await loadWorkspaceDetail(activeWs);
+    }
+    setTestModeBusy(false);
+  }
+
+  async function disableTestMode() {
+    if (!activeWs || testModeBusy) return;
+    if (!confirm("Remove all tasks and buckets created by Test Mode?")) return;
+    setTestModeBusy(true);
+    const res = await fetch("/api/test-mode", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workspaceId: activeWs }),
+    });
+    if (res.ok) {
+      setTestMode({ active: false, count: 0 });
+      await loadWorkspaceDetail(activeWs);
+    }
+    setTestModeBusy(false);
   }
 
   const current = workspaces.find((w) => w.id === activeWs);
@@ -409,8 +452,9 @@ export default function SettingsPage() {
       >
         <h2 style={{ margin: 0, fontSize: "1rem" }}>Devices & access code</h2>
         <p style={{ margin: 0, color: "var(--ink-muted)", fontSize: "0.9rem" }}>
-          Copy this 6-digit code, then paste it on the login screen of another device to open the
-          same account and tasks.
+          Copy this 6-digit code to open <em>this</em> account on another of your devices. Anyone
+          with the code can see and edit your plan — don’t share it. Friends should use “Start a new
+          account” on the login page to get their own blank workspace and code.
         </p>
         <div
           style={{
@@ -848,6 +892,75 @@ export default function SettingsPage() {
               <span className="badge">Coming soon</span>
             </div>
           ))}
+        </div>
+      </section>
+
+      <section
+        id="settings-test-mode"
+        className="card settings-section"
+        style={{ padding: "1rem", display: "grid", gap: "0.85rem" }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "0.75rem",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+            <FlaskConical size={18} color="var(--brand)" />
+            <h2 style={{ margin: 0, fontSize: "1rem" }}>Test Mode</h2>
+          </div>
+          <span className={`badge ${testMode.active ? "" : "warn"}`}>
+            {testMode.active ? `${testMode.count} test tasks` : "Off"}
+          </span>
+        </div>
+        <p style={{ margin: 0, color: "var(--ink-muted)", fontSize: "0.9rem" }}>
+          Fill the selected workspace with realistic sample data: priorities 1–5, overdue and
+          future due dates, task sizes, checklists, links, recurrence, completion states, and four
+          clearly marked test buckets.
+        </p>
+        <div
+          style={{
+            padding: "0.75rem",
+            borderRadius: 10,
+            border: "1px solid var(--line)",
+            background: "color-mix(in srgb, var(--brand) 6%, transparent)",
+            fontSize: "0.85rem",
+            color: "var(--ink-muted)",
+          }}
+        >
+          Test data is labelled and isolated. Turning Test Mode off removes only data it created;
+          your real tasks and buckets are left unchanged.
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.45rem" }}>
+          {!testMode.active ? (
+            <button
+              className="btn"
+              type="button"
+              onClick={() => void enableTestMode()}
+              disabled={testModeBusy || !activeWs}
+            >
+              <FlaskConical size={16} />
+              {testModeBusy ? "Creating…" : "Enable Test Mode"}
+            </button>
+          ) : (
+            <>
+              <a className="btn" href="/tasks">
+                View test tasks
+              </a>
+              <button
+                className="btn secondary"
+                type="button"
+                onClick={() => void disableTestMode()}
+                disabled={testModeBusy}
+              >
+                <Trash2 size={16} />
+                {testModeBusy ? "Removing…" : "Turn off & remove test data"}
+              </button>
+            </>
+          )}
         </div>
       </section>
 

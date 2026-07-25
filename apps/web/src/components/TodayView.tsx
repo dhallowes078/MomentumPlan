@@ -112,7 +112,7 @@ export function TodayView() {
   }
 
   async function onDrop() {
-    if (dragIndex == null) return;
+    if (dragOriginIndex.current == null && dragIndex == null) return;
     const next = blocks;
     const from = dragOriginIndex.current;
     const to = dragIndex;
@@ -121,24 +121,29 @@ export function TodayView() {
     setDragIndex(null);
     setOverIndex(null);
 
-    if (from == null || from === to) {
+    if (from == null || to == null || from === to) {
+      await load();
+      return;
+    }
+
+    const orderChanged =
+      start.map((b) => b.id).join("|") !== next.map((b) => b.id).join("|");
+    if (!orderChanged) {
       await load();
       return;
     }
 
     const prioritiesDiffer = crossedDifferentPriority(from, to, start);
+    const message = prioritiesDiffer
+      ? "Save this agenda order and update priority numbers to match?"
+      : "Save this new agenda order?";
 
-    let applyPriorities = false;
-    if (prioritiesDiffer) {
-      applyPriorities = window.confirm(
-        "This order mixes different priorities. Update priority numbers to match the new agenda order?"
-      );
-      if (!applyPriorities) {
-        await load();
-        return;
-      }
+    if (!window.confirm(message)) {
+      await load();
+      return;
     }
 
+    const applyPriorities = prioritiesDiffer;
     const updates = next.map((b, i) => {
       const priority = applyPriorities
         ? Math.max(1, Math.min(5, 5 - Math.floor((i / Math.max(next.length - 1, 1)) * 4)))
@@ -173,7 +178,7 @@ export function TodayView() {
             Today
           </h1>
           <p style={{ margin: "0.35rem 0 0", color: "var(--ink-muted)" }}>
-            Drag agenda items to reorder. Incomplete work is pushed forward, never missed.
+            Drag by the grip handle (⋮⋮) to reorder — you’ll get a confirmation before it saves.
           </p>
         </div>
         <button className="btn secondary" onClick={reschedule} disabled={scheduling}>
@@ -222,13 +227,10 @@ export function TodayView() {
                 className={`${completingId === b.task.id ? "completing" : "rise"} ${
                   dragIndex === i ? "drag-ghost" : overIndex === i && dragIndex != null ? "dragging-item" : ""
                 }`}
-                draggable
-                onDragStart={() => onDragStart(i)}
                 onDragOver={(e) => {
                   e.preventDefault();
                   onDragOver(i);
                 }}
-                onDragEnd={() => void onDrop()}
                 style={{
                   display: "grid",
                   gridTemplateColumns: "28px 72px 1fr auto",
@@ -241,11 +243,27 @@ export function TodayView() {
                     ? `4px solid ${b.task.bucket.color}`
                     : "4px solid transparent",
                   animationDelay: `${i * 40}ms`,
-                  cursor: "grab",
                   transition: "transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease",
                 }}
               >
-                <GripVertical size={16} color="var(--ink-muted)" />
+                <span
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.effectAllowed = "move";
+                    onDragStart(i);
+                  }}
+                  onDragEnd={() => void onDrop()}
+                  title="Drag to reorder"
+                  style={{
+                    display: "grid",
+                    placeItems: "center",
+                    cursor: "grab",
+                    touchAction: "none",
+                    padding: "0.25rem",
+                  }}
+                >
+                  <GripVertical size={16} color="var(--ink-muted)" />
+                </span>
                 <div style={{ fontSize: "0.8rem", color: "var(--ink-muted)", lineHeight: 1.35 }}>
                   <div>{formatTime(b.start)}</div>
                   <div>{formatTime(b.end)}</div>

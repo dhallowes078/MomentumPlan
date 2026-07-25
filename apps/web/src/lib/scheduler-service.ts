@@ -154,6 +154,7 @@ export async function runSchedulerForUser(userId: string) {
         lockedStart: t.locked ? t.scheduledStart : null,
         lockedEnd: t.locked ? t.scheduledEnd : null,
         allowSplit: t.allowSplit,
+        position: t.position,
         createdAt: t.createdAt,
       };
     })

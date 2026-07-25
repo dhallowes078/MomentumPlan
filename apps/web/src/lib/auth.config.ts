@@ -1,5 +1,4 @@
 import type { NextAuthConfig } from "next-auth";
-import Credentials from "next-auth/providers/credentials";
 import Google from "next-auth/providers/google";
 import MicrosoftEntraID from "next-auth/providers/microsoft-entra-id";
 
@@ -21,22 +20,12 @@ const googleConfigured = Boolean(
   process.env.AUTH_GOOGLE_ID && process.env.AUTH_GOOGLE_SECRET
 );
 
+/**
+ * Edge-safe auth config used by middleware.
+ * Local / device-code providers that need Prisma live in auth.ts only.
+ */
 export const authConfig = {
   providers: [
-    Credentials({
-      id: "local",
-      name: "Local user",
-      credentials: {},
-      authorize() {
-        if (process.env.AUTH_ALLOW_LOCAL_LOGIN !== "true") return null;
-
-        return {
-          id: "local-dev-user",
-          name: "Local User",
-          email: "local@momentum.test",
-        };
-      },
-    }),
     ...(microsoftConfigured
       ? [
           MicrosoftEntraID({
