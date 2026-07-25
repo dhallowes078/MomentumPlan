@@ -410,7 +410,8 @@ select {
 }
 
 .page-wrap {
-  width: min(100%, 960px);
+  width: 100%;
+  max-width: none;
   margin: 0 auto;
   display: grid;
   gap: 1rem;

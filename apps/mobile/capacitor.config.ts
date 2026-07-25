@@ -1,14 +1,15 @@
 import type { CapacitorConfig } from "@capacitor/cli";
 
-const serverUrl = process.env.MOMENTUM_SERVER_URL || "http://10.0.2.2:3000";
+// Physical device: phone must reach this URL on your LAN (or a Cloudflare tunnel).
+// Emulator: use http://10.0.2.2:3000
+const serverUrl =
+  process.env.MOMENTUM_SERVER_URL || "http://192.168.4.164:3000";
 
 const config: CapacitorConfig = {
   appId: "app.momentum.plan",
   appName: "Momentum",
   webDir: "www",
   server: {
-    // Load the Next.js app (dev: Android emulator → host machine).
-    // Override with MOMENTUM_SERVER_URL for tunnel / production.
     url: serverUrl,
     cleartext: true,
   },
