@@ -16,7 +16,7 @@
   --radius: 14px;
   --field-bg: rgba(255, 255, 255, 0.7);
   --card-bg: color-mix(in srgb, var(--bg-elevated) 92%, white);
-  --shell-max: 1080px;
+  --shell-max: 1280px;
 }
 
 :root[data-theme="dark"] {
@@ -86,7 +86,18 @@ body {
     radial-gradient(900px 500px at 100% 0%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 50%),
     linear-gradient(180deg, color-mix(in srgb, var(--bg) 88%, var(--brand)) 0%, var(--bg) 40%, var(--bg) 100%);
   font-family: var(--font-sans), system-ui, sans-serif;
+  font-size: 16px;
   transition: background 0.25s ease, color 0.25s ease;
+}
+
+@media (max-width: 720px) {
+  body {
+    font-size: 14px;
+  }
+
+  h1 {
+    font-size: 1.45rem !important;
+  }
 }
 
 a {
@@ -153,6 +164,71 @@ select {
   color: var(--ink-muted);
   border-color: transparent;
   padding-inline: 0.6rem;
+}
+
+.btn.compact {
+  padding: 0.32rem 0.65rem;
+  font-size: 0.78rem;
+  gap: 0.3rem;
+  border-radius: 999px;
+}
+
+.btn.compact .bucket-swatch {
+  width: 10px;
+  height: 10px;
+}
+
+.filter-bar {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.filter-bar .field {
+  width: auto;
+  padding: 0.32rem 0.55rem;
+  font-size: 0.78rem;
+  border-radius: 10px;
+  min-height: 0;
+}
+
+.emoji-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 0.3rem;
+  padding: 0.45rem;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg-elevated) 55%, transparent);
+}
+
+.emoji-pick {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 10px;
+  font-size: 1.25rem;
+  line-height: 1;
+  padding: 0.35rem 0.15rem;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, transform 0.12s ease;
+}
+
+.emoji-pick:hover {
+  background: color-mix(in srgb, var(--brand) 10%, transparent);
+  transform: scale(1.06);
+}
+
+.emoji-pick[data-active="true"] {
+  border-color: color-mix(in srgb, var(--brand) 45%, var(--line));
+  background: color-mix(in srgb, var(--brand) 14%, transparent);
+}
+
+@media (max-width: 520px) {
+  .emoji-picker-grid {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
 }
 
 .field {
@@ -334,7 +410,7 @@ select {
 }
 
 .page-wrap {
-  width: min(100%, 820px);
+  width: min(100%, 960px);
   margin: 0 auto;
   display: grid;
   gap: 1rem;

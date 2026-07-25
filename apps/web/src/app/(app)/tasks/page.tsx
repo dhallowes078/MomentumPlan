@@ -27,6 +27,7 @@ type Task = {
   assigneeId?: string | null;
   headerImageKey?: string | null;
   headerImageUrl?: string | null;
+  emoji?: string | null;
   bucket?: { id: string; name: string; color: string } | null;
   assignee?: { id: string; name: string | null; email: string } | null;
   completedAt?: string | null;
@@ -117,16 +118,16 @@ export default function TasksPage() {
         </button>
       </div>
 
-      <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+      <div className="filter-bar">
         <button
-          className="btn secondary"
+          className="btn secondary compact"
           style={tab === "open" ? { background: "color-mix(in srgb, var(--brand) 14%, transparent)" } : undefined}
           onClick={() => setTab("open")}
         >
           Open
         </button>
         <button
-          className="btn secondary"
+          className="btn secondary compact"
           style={
             tab === "completed" ? { background: "color-mix(in srgb, var(--brand) 14%, transparent)" } : undefined
           }
@@ -136,7 +137,6 @@ export default function TasksPage() {
         </button>
         <select
           className="field"
-          style={{ width: "auto" }}
           value={workspaceId}
           onChange={(e) => setWorkspaceId(e.target.value)}
         >
@@ -148,7 +148,6 @@ export default function TasksPage() {
         </select>
         <select
           className="field"
-          style={{ width: "auto" }}
           value={assigneeFilter}
           onChange={(e) => setAssigneeFilter(e.target.value)}
         >
@@ -161,7 +160,6 @@ export default function TasksPage() {
         </select>
         <select
           className="field"
-          style={{ width: "auto" }}
           value={priorityFilter}
           onChange={(e) => setPriorityFilter(e.target.value)}
         >
@@ -173,7 +171,7 @@ export default function TasksPage() {
           ))}
         </select>
         <button
-          className="btn secondary"
+          className="btn secondary compact"
           style={bucketFilter === "all" ? { background: "color-mix(in srgb, var(--brand) 12%, transparent)" } : undefined}
           onClick={() => setBucketFilter("all")}
         >
@@ -182,7 +180,7 @@ export default function TasksPage() {
         {current?.buckets.map((b) => (
           <button
             key={b.id}
-            className="btn secondary"
+            className="btn secondary compact"
             style={
               bucketFilter === b.id
                 ? {
@@ -222,7 +220,10 @@ export default function TasksPage() {
           >
             <span className="priority-dot" style={{ background: priorityColor(t.priority) }} />
             <Link href={`/tasks/${t.id}`} style={{ position: "relative", zIndex: 1 }}>
-              <div style={{ fontWeight: 600 }}>{t.title}</div>
+              <div style={{ fontWeight: 600 }}>
+                {t.emoji ? `${t.emoji} ` : ""}
+                {t.title}
+              </div>
               <div style={{ fontSize: "0.8rem", color: "var(--ink-muted)", marginTop: "0.2rem" }}>
                 {t.priority} · {formatMinutes(t.estimateMinutes)}
                 {t.bucket ? ` · ${t.bucket.name}` : ""}

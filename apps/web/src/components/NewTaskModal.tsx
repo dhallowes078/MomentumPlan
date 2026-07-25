@@ -10,6 +10,7 @@ import { BucketSelect } from "@/components/BucketSelect";
 import { DueDatePicker } from "@/components/DueDatePicker";
 import { AssigneeSelect } from "@/components/AssigneeSelect";
 import { FileButton } from "@/components/FileButton";
+import { EmojiPicker } from "@/components/EmojiPicker";
 
 type Member = {
   id: string;
@@ -59,6 +60,7 @@ export function NewTaskModal({
   const [linkUrl, setLinkUrl] = useState("");
   const [headerFile, setHeaderFile] = useState<File | null>(null);
   const [headerPreview, setHeaderPreview] = useState<string | null>(null);
+  const [emoji, setEmoji] = useState<string | null>(null);
   const [docs, setDocs] = useState<File[]>([]);
   const [saving, setSaving] = useState(false);
   const [isRecurring, setIsRecurring] = useState(false);
@@ -150,6 +152,7 @@ export function NewTaskModal({
     setLinks([]);
     setLinkUrl("");
     setHeaderFile(null);
+    setEmoji(null);
     setDocs([]);
   }
 
@@ -187,6 +190,7 @@ export function NewTaskModal({
         workspaceId,
         title,
         notes: mode === "full" && notes.trim() ? notes : null,
+        emoji: mode === "full" ? emoji : null,
         priority,
         estimateMinutes: Math.max(5, estimate),
         bucketId: bucketId || null,
@@ -374,6 +378,8 @@ export function NewTaskModal({
             autoFocus
             required
           />
+
+          {mode === "full" && <EmojiPicker value={emoji} onChange={setEmoji} />}
 
           <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
             Bucket

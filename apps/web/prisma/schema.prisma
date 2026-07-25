@@ -134,6 +134,7 @@ model Task {
   bucketId        String?
   title           String
   notes           String?
+  emoji           String?
   headerImageKey  String?
   status          String    @default("TODO") // TODO IN_PROGRESS DONE CANCELLED
   priority        Int       @default(3)

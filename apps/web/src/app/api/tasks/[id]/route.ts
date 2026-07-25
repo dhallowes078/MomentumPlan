@@ -25,6 +25,7 @@ const updateSchema = z.object({
   scheduledStart: z.string().datetime().nullable().optional(),
   scheduledEnd: z.string().datetime().nullable().optional(),
   headerImageKey: z.string().nullable().optional(),
+  emoji: z.string().max(8).nullable().optional(),
   mentionIds: z.array(z.string()).optional(),
   isRecurring: z.boolean().optional(),
   recurFreq: z.enum(["DAILY", "WEEKLY", "MONTHLY"]).nullable().optional(),
@@ -199,6 +200,7 @@ export async function PATCH(
           }
         : {}),
       ...("headerImageKey" in rest ? { headerImageKey: rest.headerImageKey } : {}),
+      ...("emoji" in rest ? { emoji: rest.emoji } : {}),
       ...("isRecurring" in rest ? { isRecurring: rest.isRecurring } : {}),
       ...("recurFreq" in rest ? { recurFreq: rest.recurFreq } : {}),
       ...("recurInterval" in rest ? { recurInterval: rest.recurInterval } : {}),

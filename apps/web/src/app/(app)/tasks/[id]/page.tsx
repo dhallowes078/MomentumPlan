@@ -22,6 +22,7 @@ import { BucketSelect } from "@/components/BucketSelect";
 import { DueDatePicker } from "@/components/DueDatePicker";
 import { AssigneeSelect } from "@/components/AssigneeSelect";
 import { FileButton } from "@/components/FileButton";
+import { EmojiPicker } from "@/components/EmojiPicker";
 
 type Member = {
   id: string;
@@ -49,6 +50,7 @@ type TaskDetail = {
   notes: string | null;
   headerImageKey: string | null;
   headerImageUrl?: string | null;
+  emoji?: string | null;
   priority: number;
   estimateMinutes: number;
   status: string;
@@ -111,6 +113,7 @@ type TaskDraft = {
   allowSplit: boolean;
   headerImageKey: string | null;
   headerImageUrl: string | null;
+  emoji: string | null;
   isRecurring: boolean;
   recurFreq: RecurFreq;
   recurInterval: number;
@@ -134,6 +137,7 @@ function toDraft(task: TaskDetail): TaskDraft {
     allowSplit: task.allowSplit,
     headerImageKey: task.headerImageKey,
     headerImageUrl: task.headerImageUrl ?? null,
+    emoji: task.emoji ?? null,
     isRecurring: Boolean(task.isRecurring),
     recurFreq: task.recurFreq ?? "WEEKLY",
     recurInterval: task.recurInterval ?? 1,
@@ -184,6 +188,7 @@ function draftPatchBody(draft: TaskDraft, baseline: TaskDraft) {
   if (draft.headerImageKey !== baseline.headerImageKey) {
     body.headerImageKey = draft.headerImageKey;
   }
+  if (draft.emoji !== baseline.emoji) body.emoji = draft.emoji;
   if (draft.isRecurring !== baseline.isRecurring) body.isRecurring = draft.isRecurring;
   if (draft.isRecurring) {
     if (draft.recurFreq !== baseline.recurFreq || draft.isRecurring !== baseline.isRecurring) {
@@ -517,6 +522,11 @@ export default function TaskDetailPage() {
             style={{ fontSize: "1.25rem", fontWeight: 650 }}
             value={draft.title}
             onChange={(e) => updateDraft({ title: e.target.value })}
+          />
+
+          <EmojiPicker
+            value={draft.emoji}
+            onChange={(emoji) => updateDraft({ emoji })}
           />
 
           <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
