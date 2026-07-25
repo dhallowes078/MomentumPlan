@@ -13,6 +13,7 @@ model User {
   email         String    @unique
   emailVerified DateTime?
   image         String?
+  color         String    @default("#3D6B4F")
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -27,6 +28,8 @@ model User {
   invitesSent        WorkspaceInvite[]   @relation("InviteSender")
   calendarConnection CalendarConnection?
   schedulePrefs      SchedulePrefs?
+  mentions           TaskMention[]
+  templates          TaskTemplate[]
 }
 
 model Account {
@@ -75,6 +78,7 @@ model Workspace {
   buckets Bucket[]
   tasks   Task[]
   invites WorkspaceInvite[]
+  templates TaskTemplate[]
 }
 
 model WorkspaceMember {
@@ -128,19 +132,32 @@ model Task {
   bucketId        String?
   title           String
   notes           String?
+  headerImageKey  String?
   status          String    @default("TODO") // TODO IN_PROGRESS DONE CANCELLED
   priority        Int       @default(3)
   estimateMinutes Int       @default(30)
-  dueAt           DateTime?
-  scheduledStart  DateTime?
-  scheduledEnd    DateTime?
-  atRisk          Boolean   @default(false)
+  dueAt                 DateTime?
+  scheduledStart        DateTime?
+  scheduledEnd          DateTime?
+  originalScheduledStart DateTime?
+  originalScheduledEnd   DateTime?
+  atRisk                Boolean   @default(false)
   locked          Boolean   @default(false)
   allowSplit      Boolean   @default(true)
   position        Int       @default(0)
   completedAt     DateTime?
   assigneeId      String?
   createdById     String
+  // Recurrence
+  isRecurring           Boolean   @default(false)
+  recurFreq             String?   // DAILY WEEKLY MONTHLY
+  recurInterval         Int       @default(1)
+  recurByWeekdays       Json?
+  recurEndsAt           DateTime?
+  recurCount            Int?
+  recurOccurrencesDone  Int       @default(0)
+  recurParentId         String?
+  templateId            String?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
@@ -148,15 +165,67 @@ model Task {
   bucket         Bucket?         @relation(fields: [bucketId], references: [id], onDelete: SetNull)
   assignee       User?           @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
   createdBy      User            @relation("TaskCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  template       TaskTemplate?   @relation(fields: [templateId], references: [id], onDelete: SetNull)
   links          TaskLink[]
   attachments    Attachment[]
   comments       Comment[]
   events         TaskEvent[]
   scheduleBlocks ScheduleBlock[]
+  checklistItems ChecklistItem[]
+  mentions       TaskMention[]
 
   @@index([workspaceId, status])
   @@index([assigneeId])
   @@index([dueAt])
+}
+
+model TaskTemplate {
+  id              String   @id @default(cuid())
+  workspaceId     String
+  name            String
+  title           String
+  notes           String?
+  priority        Int      @default(3)
+  estimateMinutes Int      @default(30)
+  bucketId        String?
+  headerImageKey  String?
+  checklistJson   Json?
+  linksJson       Json?
+  createdById     String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy User      @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  tasks     Task[]
+
+  @@index([workspaceId])
+}
+
+model ChecklistItem {
+  id        String   @id @default(cuid())
+  taskId    String
+  text      String
+  done      Boolean  @default(false)
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId, position])
+}
+
+model TaskMention {
+  id        String   @id @default(cuid())
+  taskId    String
+  userId    String
+  createdAt DateTime @default(now())
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, userId])
 }
 
 model TaskLink {
@@ -230,6 +299,7 @@ model ScheduleBlock {
   outlookEventId String?
   start          DateTime
   end            DateTime
+  completed      Boolean  @default(false)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -251,6 +321,12 @@ model SchedulePrefs {
   minChunkMinutes   Int     @default(25)
   bufferMinutes     Int     @default(5)
   timezone          String  @default("UTC")
+  tinyMinutes       Int     @default(15)
+  smallMinutes      Int     @default(30)
+  mediumMinutes     Int     @default(60)
+  bigMinutes        Int     @default(120)
+  themeColor        String  @default("#1f4d3a")
+  darkMode          Boolean @default(false)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

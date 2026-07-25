@@ -1,9 +1,12 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CalendarDays, CheckSquare, Settings2, SunMedium } from "lucide-react";
+import { CalendarDays, CheckSquare, Plus, Settings2, SunMedium } from "lucide-react";
 import clsx from "clsx";
+import { NewTaskModal } from "@/components/NewTaskModal";
+import { TrafficLights } from "@/components/TrafficLights";
 
 const links = [
   { href: "/today", label: "Today", icon: SunMedium },
@@ -20,6 +23,15 @@ export function AppShell({
   userName?: string | null;
 }) {
   const pathname = usePathname();
+  const [newTaskOpen, setNewTaskOpen] = useState(false);
+  const [newTaskMode, setNewTaskMode] = useState<"simple" | "full">("full");
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      void fetch("/api/schedule/run", { method: "POST" });
+    }, 300_000);
+    return () => window.clearInterval(id);
+  }, []);
 
   return (
     <div className="app-shell">
@@ -31,7 +43,9 @@ export function AppShell({
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
+          gap: "0.75rem",
           gridColumn: "1 / -1",
+          flexWrap: "wrap",
         }}
       >
         <div>
@@ -49,6 +63,16 @@ export function AppShell({
             {userName ? `Plan for ${userName}` : "Auto-plan your day"}
           </div>
         </div>
+        <TrafficLights />
+        <button
+          className="btn"
+          onClick={() => {
+            setNewTaskMode("full");
+            setNewTaskOpen(true);
+          }}
+        >
+          <Plus size={16} /> New Task
+        </button>
       </header>
 
       <aside className="card side-nav">
@@ -101,6 +125,12 @@ export function AppShell({
           );
         })}
       </nav>
+
+      <NewTaskModal
+        open={newTaskOpen}
+        initialMode={newTaskMode}
+        onClose={() => setNewTaskOpen(false)}
+      />
     </div>
   );
 }

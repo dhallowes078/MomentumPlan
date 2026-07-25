@@ -1,6 +1,12 @@
 import { signIn } from "@/lib/auth";
 
 export default function LoginPage() {
+  const localLoginEnabled = process.env.AUTH_ALLOW_LOCAL_LOGIN === "true";
+  const microsoftLoginEnabled = Boolean(
+    process.env.AUTH_MICROSOFT_ENTRA_ID_ID &&
+      process.env.AUTH_MICROSOFT_ENTRA_ID_SECRET
+  );
+
   return (
     <div
       style={{
@@ -44,19 +50,36 @@ export default function LoginPage() {
             Priority tasks, time estimates, and Outlook free time — auto-packed into a day that
             reshuffles when life moves.
           </p>
-          <form
-            action={async () => {
-              "use server";
-              await signIn("microsoft-entra-id", { redirectTo: "/today" });
-            }}
-            style={{ marginTop: "1.75rem" }}
-          >
-            <button className="btn" type="submit" style={{ width: "100%" }}>
-              Continue with Microsoft
-            </button>
-          </form>
+          <div style={{ display: "grid", gap: "0.75rem", marginTop: "1.75rem" }}>
+            {localLoginEnabled && (
+              <form
+                action={async () => {
+                  "use server";
+                  await signIn("local", { redirectTo: "/today" });
+                }}
+              >
+                <button className="btn" type="submit" style={{ width: "100%" }}>
+                  Continue locally
+                </button>
+              </form>
+            )}
+            {microsoftLoginEnabled && (
+              <form
+                action={async () => {
+                  "use server";
+                  await signIn("microsoft-entra-id", { redirectTo: "/today" });
+                }}
+              >
+                <button className="btn" type="submit" style={{ width: "100%" }}>
+                  Continue with Microsoft
+                </button>
+              </form>
+            )}
+          </div>
           <p style={{ fontSize: "0.8rem", color: "var(--ink-muted)", marginTop: "1rem" }}>
-            Uses Microsoft Graph for calendar read/write. Personal and work accounts supported.
+            {localLoginEnabled
+              ? "Local mode stores your data on this device. Connect Microsoft later for Outlook calendar sync."
+              : "Uses Microsoft Graph for calendar read/write. Personal and work accounts supported."}
           </p>
         </div>
       </div>

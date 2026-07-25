@@ -14,6 +14,8 @@ import {
 } from "@/lib/graph";
 import { addDays } from "date-fns";
 
+const MS_PER_MIN = 60_000;
+
 async function loadPrefs(userId: string): Promise<SchedulerPrefs> {
   const row = await prisma.schedulePrefs.findUnique({ where: { userId } });
   if (!row) return DEFAULT_PREFS;
@@ -35,6 +37,10 @@ async function loadPrefs(userId: string): Promise<SchedulerPrefs> {
   };
 }
 
+function sameInstant(a: Date, b: Date) {
+  return Math.abs(a.getTime() - b.getTime()) < 1000;
+}
+
 export async function runSchedulerForUser(userId: string) {
   const prefs = await loadPrefs(userId);
   const now = new Date();
@@ -46,11 +52,25 @@ export async function runSchedulerForUser(userId: string) {
   });
   const workspaceIds = memberships.map((m) => m.workspaceId);
 
+  await prisma.task.updateMany({
+    where: {
+      workspaceId: { in: workspaceIds },
+      status: { in: ["TODO", "IN_PROGRESS"] },
+      locked: true,
+      scheduledEnd: { lt: now },
+      OR: [{ assigneeId: userId }, { assigneeId: null, createdById: userId }],
+    },
+    data: { locked: false },
+  });
+
   const tasks = await prisma.task.findMany({
     where: {
       workspaceId: { in: workspaceIds },
       status: { in: ["TODO", "IN_PROGRESS"] },
       OR: [{ assigneeId: userId }, { assigneeId: null, createdById: userId }],
+    },
+    include: {
+      scheduleBlocks: true,
     },
   });
 
@@ -69,21 +89,46 @@ export async function runSchedulerForUser(userId: string) {
     hasGraph = false;
   }
 
-  const schedulable: SchedulableTask[] = tasks.map((t) => ({
-    id: t.id,
-    priority: t.priority,
-    estimateMinutes: t.estimateMinutes,
-    dueAt: t.dueAt,
-    locked: t.locked,
-    lockedStart: t.locked ? t.scheduledStart : null,
-    lockedEnd: t.locked ? t.scheduledEnd : null,
-    allowSplit: t.allowSplit,
-    createdAt: t.createdAt,
-  }));
+  // Completed chunks stay put and count as busy + done time.
+  const completedBusy: BusyBlock[] = [];
+  const completedMinutesByTask = new Map<string, number>();
+  for (const task of tasks) {
+    let doneMin = 0;
+    for (const block of task.scheduleBlocks) {
+      if (!block.completed) continue;
+      completedBusy.push({ start: block.start, end: block.end });
+      doneMin += Math.max(
+        0,
+        Math.round((block.end.getTime() - block.start.getTime()) / MS_PER_MIN)
+      );
+    }
+    completedMinutesByTask.set(task.id, doneMin);
+  }
 
-  const result = packSchedule(schedulable, outlookBusy, now, prefs);
+  const schedulable: SchedulableTask[] = tasks
+    .map((t) => {
+      const remaining = Math.max(0, t.estimateMinutes - (completedMinutesByTask.get(t.id) ?? 0));
+      return {
+        id: t.id,
+        priority: t.priority,
+        estimateMinutes: remaining,
+        dueAt: t.dueAt,
+        locked: t.locked,
+        lockedStart: t.locked ? t.scheduledStart : null,
+        lockedEnd: t.locked ? t.scheduledEnd : null,
+        allowSplit: t.allowSplit,
+        createdAt: t.createdAt,
+      };
+    })
+    .filter((t) => t.estimateMinutes > 0 || t.locked);
 
-  // Group placements by task (splits)
+  const result = packSchedule(
+    schedulable,
+    [...outlookBusy, ...completedBusy],
+    now,
+    prefs
+  );
+
   const byTask = new Map<string, typeof result.placements>();
   for (const p of result.placements) {
     const list = byTask.get(p.taskId) ?? [];
@@ -95,43 +140,85 @@ export async function runSchedulerForUser(userId: string) {
   const usedBlockIds = new Set<string>();
 
   for (const task of tasks) {
+    const completedBlocks = existingBlocks.filter(
+      (b) => b.taskId === task.id && b.completed
+    );
+    for (const b of completedBlocks) usedBlockIds.add(b.id);
+
     const placements = byTask.get(task.id) ?? [];
     const primary = placements[0];
     const atRisk =
       result.unplaced.some((u) => u.taskId === task.id && u.atRisk) ||
       placements.some((p) => p.atRisk);
 
-    if (!primary) {
-      await prisma.task.update({
-        where: { id: task.id },
-        data: {
-          scheduledStart: null,
-          scheduledEnd: null,
-          atRisk,
-        },
-      });
+    if (!primary && completedBlocks.length === 0) {
+      const changed =
+        task.scheduledStart != null || task.scheduledEnd != null || task.atRisk !== atRisk;
+      if (changed) {
+        await prisma.task.update({
+          where: { id: task.id },
+          data: {
+            scheduledStart: null,
+            scheduledEnd: null,
+            atRisk,
+          },
+        });
+      }
       continue;
     }
 
-    // Primary window = first chunk start → last chunk end (or sum contiguous)
-    const last = placements[placements.length - 1];
-    await prisma.task.update({
-      where: { id: task.id },
-      data: {
-        scheduledStart: primary.start,
-        scheduledEnd: last.end,
-        atRisk,
-      },
-    });
+    const last = placements[placements.length - 1] ?? null;
+    const windowStart = primary?.start ?? completedBlocks[0]?.start ?? null;
+    const windowEndSlot =
+      last?.end ??
+      completedBlocks[completedBlocks.length - 1]?.end ??
+      null;
 
-    // Sync each chunk as a schedule block (+ Outlook)
-    const taskBlocks = existingBlocks.filter((b) => b.taskId === task.id);
+    if (windowStart && windowEndSlot) {
+      const startSame =
+        task.scheduledStart && sameInstant(task.scheduledStart, windowStart);
+      const endSame = task.scheduledEnd && sameInstant(task.scheduledEnd, windowEndSlot);
+      if (!startSame || !endSame || task.atRisk !== atRisk) {
+        await prisma.task.update({
+          where: { id: task.id },
+          data: {
+            scheduledStart: windowStart,
+            scheduledEnd: windowEndSlot,
+            ...(task.originalScheduledStart
+              ? {}
+              : {
+                  originalScheduledStart: windowStart,
+                  originalScheduledEnd: windowEndSlot,
+                }),
+            atRisk,
+          },
+        });
+      } else if (!task.originalScheduledStart) {
+        await prisma.task.update({
+          where: { id: task.id },
+          data: {
+            originalScheduledStart: windowStart,
+            originalScheduledEnd: windowEndSlot,
+          },
+        });
+      }
+    }
+
+    const openBlocks = existingBlocks.filter(
+      (b) => b.taskId === task.id && !b.completed
+    );
+
     for (let i = 0; i < placements.length; i++) {
       const p = placements[i];
-      let block = taskBlocks[i];
+      let block = openBlocks[i];
       let outlookEventId = block?.outlookEventId ?? null;
 
-      if (hasGraph) {
+      const unchanged =
+        block &&
+        sameInstant(block.start, p.start) &&
+        sameInstant(block.end, p.end);
+
+      if (hasGraph && !unchanged) {
         try {
           outlookEventId = await upsertTaskEvent(userId, {
             eventId: outlookEventId,
@@ -146,14 +233,28 @@ export async function runSchedulerForUser(userId: string) {
       }
 
       if (block) {
-        block = await prisma.scheduleBlock.update({
-          where: { id: block.id },
-          data: {
-            start: p.start,
-            end: p.end,
-            outlookEventId,
-          },
-        });
+        if (!unchanged) {
+          block = await prisma.scheduleBlock.update({
+            where: { id: block.id },
+            data: {
+              start: p.start,
+              end: p.end,
+              outlookEventId,
+            },
+          });
+          await prisma.taskEvent.create({
+            data: {
+              taskId: task.id,
+              actorId: userId,
+              type: "RESCHEDULED",
+              payload: {
+                start: p.start.toISOString(),
+                end: p.end.toISOString(),
+                atRisk: p.atRisk,
+              },
+            },
+          });
+        }
       } else {
         block = await prisma.scheduleBlock.create({
           data: {
@@ -164,26 +265,24 @@ export async function runSchedulerForUser(userId: string) {
             outlookEventId,
           },
         });
+        await prisma.taskEvent.create({
+          data: {
+            taskId: task.id,
+            actorId: userId,
+            type: "SCHEDULED",
+            payload: {
+              start: p.start.toISOString(),
+              end: p.end.toISOString(),
+              atRisk: p.atRisk,
+            },
+          },
+        });
       }
       usedBlockIds.add(block.id);
-
-      await prisma.taskEvent.create({
-        data: {
-          taskId: task.id,
-          actorId: userId,
-          type: taskBlocks[i] ? "RESCHEDULED" : "SCHEDULED",
-          payload: {
-            start: p.start.toISOString(),
-            end: p.end.toISOString(),
-            atRisk: p.atRisk,
-          },
-        },
-      });
     }
 
-    // Remove extra blocks for this task
-    for (let i = placements.length; i < taskBlocks.length; i++) {
-      const extra = taskBlocks[i];
+    for (let i = placements.length; i < openBlocks.length; i++) {
+      const extra = openBlocks[i];
       if (hasGraph && extra.outlookEventId) {
         await deleteTaskEvent(userId, extra.outlookEventId);
       }
@@ -191,9 +290,9 @@ export async function runSchedulerForUser(userId: string) {
     }
   }
 
-  // Cleanup orphan blocks for this user
   for (const block of existingBlocks) {
     if (usedBlockIds.has(block.id)) continue;
+    if (block.completed) continue;
     const stillNeeded = byTask.has(block.taskId);
     if (stillNeeded) continue;
     if (hasGraph && block.outlookEventId) {

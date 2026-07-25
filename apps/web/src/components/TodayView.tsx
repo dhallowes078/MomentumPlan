@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Check, RefreshCw, TriangleAlert } from "lucide-react";
+import { Check, GripVertical, RefreshCw, TriangleAlert } from "lucide-react";
 import { formatMinutes, formatTime, priorityColor } from "@/lib/format";
 
 type Block = {
@@ -34,6 +34,11 @@ export function TodayView() {
   const [atRisk, setAtRisk] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [scheduling, setScheduling] = useState(false);
+  const [completingId, setCompletingId] = useState<string | null>(null);
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [overIndex, setOverIndex] = useState<number | null>(null);
+  const dragOriginIndex = useRef<number | null>(null);
+  const blocksAtDragStart = useRef<Block[]>([]);
 
   const load = useCallback(async () => {
     const res = await fetch("/api/today");
@@ -48,15 +53,9 @@ export function TodayView() {
   useEffect(() => {
     void load();
     const id = setInterval(async () => {
-      const poll = await fetch("/api/schedule/poll", { method: "POST" });
-      if (poll.ok) {
-        const { shouldReschedule } = await poll.json();
-        if (shouldReschedule) {
-          await fetch("/api/schedule/run", { method: "POST" });
-          await load();
-        }
-      }
-    }, 180_000);
+      await fetch("/api/schedule/run", { method: "POST" });
+      await load();
+    }, 300_000);
     return () => clearInterval(id);
   }, [load]);
 
@@ -68,10 +67,89 @@ export function TodayView() {
   }
 
   async function complete(taskId: string) {
+    setCompletingId(taskId);
     await fetch(`/api/tasks/${taskId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: "DONE" }),
+    });
+    window.setTimeout(async () => {
+      await load();
+      setCompletingId(null);
+    }, 850);
+  }
+
+  function onDragStart(index: number) {
+    dragOriginIndex.current = index;
+    blocksAtDragStart.current = blocks;
+    setDragIndex(index);
+    setOverIndex(index);
+  }
+
+  function onDragOver(index: number) {
+    if (dragIndex == null || dragIndex === index) return;
+    setOverIndex(index);
+    setBlocks((prev) => {
+      const next = [...prev];
+      const [moved] = next.splice(dragIndex, 1);
+      next.splice(index, 0, moved);
+      setDragIndex(index);
+      return next;
+    });
+  }
+
+  function crossedDifferentPriority(from: number, to: number, start: Block[]) {
+    if (from === to) return false;
+    const moved = start[from];
+    if (!moved) return false;
+    const lo = Math.min(from, to);
+    const hi = Math.max(from, to);
+    for (let i = lo; i <= hi; i++) {
+      if (i === from) continue;
+      if (start[i]?.task.priority !== moved.task.priority) return true;
+    }
+    return false;
+  }
+
+  async function onDrop() {
+    if (dragIndex == null) return;
+    const next = blocks;
+    const from = dragOriginIndex.current;
+    const to = dragIndex;
+    const start = blocksAtDragStart.current;
+    dragOriginIndex.current = null;
+    setDragIndex(null);
+    setOverIndex(null);
+
+    if (from == null || from === to) {
+      await load();
+      return;
+    }
+
+    const prioritiesDiffer = crossedDifferentPriority(from, to, start);
+
+    let applyPriorities = false;
+    if (prioritiesDiffer) {
+      applyPriorities = window.confirm(
+        "This order mixes different priorities. Update priority numbers to match the new agenda order?"
+      );
+      if (!applyPriorities) {
+        await load();
+        return;
+      }
+    }
+
+    const updates = next.map((b, i) => {
+      const priority = applyPriorities
+        ? Math.max(1, Math.min(5, 5 - Math.floor((i / Math.max(next.length - 1, 1)) * 4)))
+        : b.task.priority;
+      return { id: b.task.id, priority, position: i };
+    });
+
+    await fetch("/api/tasks/reorder", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ updates }),
     });
     await load();
   }
@@ -81,7 +159,7 @@ export function TodayView() {
   }
 
   return (
-    <div className="rise" style={{ display: "grid", gap: "1rem" }}>
+    <div className="page-wrap rise">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "end", gap: "1rem" }}>
         <div>
           <h1
@@ -95,7 +173,7 @@ export function TodayView() {
             Today
           </h1>
           <p style={{ margin: "0.35rem 0 0", color: "var(--ink-muted)" }}>
-            Scheduled focus blocks and anything still waiting for a slot.
+            Drag agenda items to reorder. Incomplete work is pushed forward, never missed.
           </p>
         </div>
         <button className="btn secondary" onClick={reschedule} disabled={scheduling}>
@@ -105,17 +183,25 @@ export function TodayView() {
       </div>
 
       {atRisk.length > 0 && (
-        <section className="card" style={{ padding: "1rem", borderColor: "rgba(163,59,45,0.35)" }}>
+        <section
+          className="card"
+          style={{ padding: "1rem", borderColor: "color-mix(in srgb, var(--danger) 35%, var(--line))" }}
+        >
           <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.75rem" }}>
             <TriangleAlert size={18} color="var(--danger)" />
-            <strong>At risk</strong>
+            <strong>Due soon</strong>
           </div>
           <div style={{ display: "grid", gap: "0.5rem" }}>
             {atRisk.map((t) => (
-              <Link key={t.id} href={`/tasks/${t.id}`} style={{ display: "flex", gap: "0.6rem", alignItems: "center" }}>
+              <Link
+                key={t.id}
+                href={`/tasks/${t.id}`}
+                style={{ display: "flex", gap: "0.6rem", alignItems: "center" }}
+              >
                 <span className="priority-dot" style={{ background: priorityColor(t.priority) }} />
+                {t.bucket && <span className="bucket-swatch" style={{ background: t.bucket.color }} />}
                 <span style={{ flex: 1 }}>{t.title}</span>
-                <span className="badge risk">won’t fit before due</span>
+                <span className="badge risk">needs an earlier slot</span>
               </Link>
             ))}
           </div>
@@ -133,18 +219,33 @@ export function TodayView() {
             {blocks.map((b, i) => (
               <div
                 key={b.id}
-                className="rise"
+                className={`${completingId === b.task.id ? "completing" : "rise"} ${
+                  dragIndex === i ? "drag-ghost" : overIndex === i && dragIndex != null ? "dragging-item" : ""
+                }`}
+                draggable
+                onDragStart={() => onDragStart(i)}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  onDragOver(i);
+                }}
+                onDragEnd={() => void onDrop()}
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "72px 1fr auto",
+                  gridTemplateColumns: "28px 72px 1fr auto",
                   gap: "0.75rem",
                   alignItems: "center",
                   padding: "0.75rem",
                   borderRadius: "12px",
-                  background: "rgba(255,255,255,0.55)",
+                  background: "color-mix(in srgb, var(--bg-elevated) 70%, transparent)",
+                  borderLeft: b.task.bucket
+                    ? `4px solid ${b.task.bucket.color}`
+                    : "4px solid transparent",
                   animationDelay: `${i * 40}ms`,
+                  cursor: "grab",
+                  transition: "transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease",
                 }}
               >
+                <GripVertical size={16} color="var(--ink-muted)" />
                 <div style={{ fontSize: "0.8rem", color: "var(--ink-muted)", lineHeight: 1.35 }}>
                   <div>{formatTime(b.start)}</div>
                   <div>{formatTime(b.end)}</div>
@@ -153,14 +254,19 @@ export function TodayView() {
                   <div style={{ display: "flex", alignItems: "center", gap: "0.45rem" }}>
                     <span className="priority-dot" style={{ background: priorityColor(b.task.priority) }} />
                     <strong>{b.task.title}</strong>
-                    {b.task.atRisk && <span className="badge risk">at risk</span>}
+                    {b.task.atRisk && <span className="badge risk">due pressure</span>}
                   </div>
                   <div style={{ fontSize: "0.8rem", color: "var(--ink-muted)", marginTop: "0.2rem" }}>
                     {formatMinutes(b.task.estimateMinutes)}
-                    {b.task.bucket ? ` · ${b.task.bucket.name}` : ""}
+                    {b.task.bucket ? ` · ${b.task.bucket.name}` : ""} · {b.task.priority}
                   </div>
                 </Link>
-                <button className="btn ghost" title="Complete" onClick={() => complete(b.task.id)}>
+                <button
+                  className="btn ghost"
+                  title="Complete"
+                  onClick={() => complete(b.task.id)}
+                  disabled={completingId === b.task.id}
+                >
                   <Check size={18} />
                 </button>
               </div>
@@ -187,6 +293,7 @@ export function TodayView() {
                 }}
               >
                 <span className="priority-dot" style={{ background: priorityColor(t.priority) }} />
+                {t.bucket && <span className="bucket-swatch" style={{ background: t.bucket.color }} />}
                 <span style={{ flex: 1 }}>{t.title}</span>
                 <span style={{ color: "var(--ink-muted)", fontSize: "0.8rem" }}>
                   {formatMinutes(t.estimateMinutes)}

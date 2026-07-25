@@ -1,4 +1,5 @@
 import type { NextAuthConfig } from "next-auth";
+import Credentials from "next-auth/providers/credentials";
 import MicrosoftEntraID from "next-auth/providers/microsoft-entra-id";
 
 const scopes = [
@@ -10,19 +11,42 @@ const scopes = [
   "Calendars.ReadWrite",
 ].join(" ");
 
+const microsoftConfigured = Boolean(
+  process.env.AUTH_MICROSOFT_ENTRA_ID_ID &&
+    process.env.AUTH_MICROSOFT_ENTRA_ID_SECRET
+);
+
 export const authConfig = {
   providers: [
-    MicrosoftEntraID({
-      clientId: process.env.AUTH_MICROSOFT_ENTRA_ID_ID!,
-      clientSecret: process.env.AUTH_MICROSOFT_ENTRA_ID_SECRET!,
-      issuer: process.env.AUTH_MICROSOFT_ENTRA_ID_ISSUER,
-      authorization: {
-        params: {
-          scope: scopes,
-        },
+    Credentials({
+      id: "local",
+      name: "Local user",
+      credentials: {},
+      authorize() {
+        if (process.env.AUTH_ALLOW_LOCAL_LOGIN !== "true") return null;
+
+        return {
+          id: "local-dev-user",
+          name: "Local User",
+          email: "local@momentum.test",
+        };
       },
-      allowDangerousEmailAccountLinking: true,
     }),
+    ...(microsoftConfigured
+      ? [
+          MicrosoftEntraID({
+            clientId: process.env.AUTH_MICROSOFT_ENTRA_ID_ID!,
+            clientSecret: process.env.AUTH_MICROSOFT_ENTRA_ID_SECRET!,
+            issuer: process.env.AUTH_MICROSOFT_ENTRA_ID_ISSUER,
+            authorization: {
+              params: {
+                scope: scopes,
+              },
+            },
+            allowDangerousEmailAccountLinking: true,
+          }),
+        ]
+      : []),
   ],
   pages: {
     signIn: "/login",

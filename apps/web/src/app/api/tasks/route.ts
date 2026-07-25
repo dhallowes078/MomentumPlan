@@ -4,6 +4,7 @@ import { requireUser, jsonError } from "@/lib/api";
 import { assertWorkspaceAccess } from "@/lib/workspace";
 import { prisma } from "@/lib/db";
 import { runSchedulerForUser } from "@/lib/scheduler-service";
+import { getFileUrl } from "@/lib/storage";
 
 const createSchema = z.object({
   workspaceId: z.string().min(1),
@@ -17,6 +18,13 @@ const createSchema = z.object({
   links: z.array(z.object({ url: z.string().url(), title: z.string().optional() })).optional(),
   locked: z.boolean().optional(),
   allowSplit: z.boolean().optional(),
+  isRecurring: z.boolean().optional(),
+  recurFreq: z.enum(["DAILY", "WEEKLY", "MONTHLY"]).nullable().optional(),
+  recurInterval: z.number().int().min(1).max(52).optional(),
+  recurByWeekdays: z.array(z.number().int().min(0).max(6)).optional(),
+  recurEndsAt: z.string().datetime().nullable().optional(),
+  recurCount: z.number().int().min(1).max(365).nullable().optional(),
+  templateId: z.string().nullable().optional(),
 });
 
 export async function GET(req: Request) {
@@ -44,14 +52,21 @@ export async function GET(req: Request) {
     },
     include: {
       bucket: true,
-      assignee: { select: { id: true, name: true, email: true, image: true } },
+      assignee: { select: { id: true, name: true, email: true, image: true, color: true } },
       links: true,
       _count: { select: { comments: true, attachments: true } },
     },
     orderBy: [{ priority: "desc" }, { dueAt: "asc" }, { createdAt: "asc" }],
   });
 
-  return NextResponse.json({ tasks });
+  const withHeaders = await Promise.all(
+    tasks.map(async (task) => ({
+      ...task,
+      headerImageUrl: task.headerImageKey ? await getFileUrl(task.headerImageKey) : null,
+    }))
+  );
+
+  return NextResponse.json({ tasks: withHeaders });
 }
 
 export async function POST(req: Request) {
@@ -81,6 +96,13 @@ export async function POST(req: Request) {
       createdById: userId,
       locked: data.locked ?? false,
       allowSplit: data.allowSplit ?? true,
+      templateId: data.templateId ?? null,
+      isRecurring: data.isRecurring ?? false,
+      recurFreq: data.isRecurring ? data.recurFreq ?? "WEEKLY" : null,
+      recurInterval: data.recurInterval ?? 1,
+      recurByWeekdays: data.recurByWeekdays ?? undefined,
+      recurEndsAt: data.recurEndsAt ? new Date(data.recurEndsAt) : null,
+      recurCount: data.recurCount ?? null,
       links: data.links
         ? { create: data.links.map((l) => ({ url: l.url, title: l.title })) }
         : undefined,

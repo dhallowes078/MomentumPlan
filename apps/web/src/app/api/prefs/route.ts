@@ -27,6 +27,12 @@ const schema = z.object({
   minChunkMinutes: z.number().int().min(5).max(120).optional(),
   bufferMinutes: z.number().int().min(0).max(60).optional(),
   timezone: z.string().optional(),
+  tinyMinutes: z.number().int().min(5).max(8 * 60).optional(),
+  smallMinutes: z.number().int().min(5).max(8 * 60).optional(),
+  mediumMinutes: z.number().int().min(5).max(8 * 60).optional(),
+  bigMinutes: z.number().int().min(5).max(8 * 60).optional(),
+  themeColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+  darkMode: z.boolean().optional(),
 });
 
 export async function PATCH(req: Request) {

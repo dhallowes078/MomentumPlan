@@ -46,6 +46,22 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       }
     },
     async signIn({ user, account }) {
+      if (user.id && account?.provider === "local") {
+        const localUser = await prisma.user.upsert({
+          where: { id: user.id },
+          create: {
+            id: user.id,
+            name: user.name ?? "Local User",
+            email: user.email ?? "local@momentum.test",
+          },
+          update: {},
+        });
+        await ensurePersonalWorkspace(
+          localUser.id,
+          localUser.name ?? localUser.email
+        );
+      }
+
       if (user.id && account?.provider === "microsoft-entra-id") {
         await ensurePersonalWorkspace(user.id, user.name ?? user.email ?? "User");
         if (account.access_token || account.refresh_token) {

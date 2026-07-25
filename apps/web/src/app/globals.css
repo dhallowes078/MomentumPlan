@@ -14,6 +14,23 @@
   --ok: #2f6b50;
   --shadow: 0 18px 50px rgba(20, 36, 28, 0.08);
   --radius: 14px;
+  --field-bg: rgba(255, 255, 255, 0.7);
+  --card-bg: color-mix(in srgb, var(--bg-elevated) 92%, white);
+  --shell-max: 1080px;
+}
+
+:root[data-theme="dark"] {
+  --bg: #101714;
+  --bg-elevated: #18211c;
+  --ink: #e6eee8;
+  --ink-muted: #9aada2;
+  --accent: #e08955;
+  --line: rgba(230, 238, 232, 0.12);
+  --danger: #e07064;
+  --warn: #e0b15a;
+  --shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+  --field-bg: rgba(8, 12, 10, 0.45);
+  --card-bg: color-mix(in srgb, var(--bg-elevated) 88%, black);
 }
 
 @theme inline {
@@ -27,6 +44,35 @@
   box-sizing: border-box;
 }
 
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: color-mix(in srgb, var(--brand) 8%, transparent);
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--brand) 45%, var(--ink-muted));
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--brand);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--brand) 55%, var(--ink-muted))
+    color-mix(in srgb, var(--brand) 10%, transparent);
+}
+
 html,
 body {
   min-height: 100%;
@@ -36,10 +82,11 @@ body {
   margin: 0;
   color: var(--ink);
   background:
-    radial-gradient(1200px 600px at 10% -10%, rgba(47, 107, 80, 0.18), transparent 55%),
-    radial-gradient(900px 500px at 100% 0%, rgba(196, 92, 38, 0.12), transparent 50%),
-    linear-gradient(180deg, #dfe8e1 0%, var(--bg) 40%, #e4ebe5 100%);
+    radial-gradient(1200px 600px at 10% -10%, color-mix(in srgb, var(--brand) 22%, transparent), transparent 55%),
+    radial-gradient(900px 500px at 100% 0%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 50%),
+    linear-gradient(180deg, color-mix(in srgb, var(--bg) 88%, var(--brand)) 0%, var(--bg) 40%, var(--bg) 100%);
   font-family: var(--font-sans), system-ui, sans-serif;
+  transition: background 0.25s ease, color 0.25s ease;
 }
 
 a {
@@ -56,19 +103,21 @@ select {
 
 .app-shell {
   min-height: 100dvh;
+  width: min(100%, var(--shell-max));
+  margin: 0 auto;
   display: grid;
   grid-template-rows: auto 1fr auto;
 }
 
 @media (min-width: 900px) {
   .app-shell {
-    grid-template-columns: 240px 1fr;
+    grid-template-columns: 200px minmax(0, 1fr);
     grid-template-rows: auto 1fr;
   }
 }
 
 .card {
-  background: color-mix(in srgb, var(--bg-elevated) 92%, white);
+  background: var(--card-bg);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
@@ -85,7 +134,7 @@ select {
   background: var(--brand);
   color: #f4f7f4;
   cursor: pointer;
-  transition: transform 0.15s ease, background 0.15s ease;
+  transition: transform 0.15s ease, background 0.15s ease, box-shadow 0.2s ease;
 }
 
 .btn:hover {
@@ -111,7 +160,7 @@ select {
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 0.65rem 0.75rem;
-  background: rgba(255, 255, 255, 0.7);
+  background: var(--field-bg);
   color: var(--ink);
 }
 
@@ -128,17 +177,17 @@ select {
   padding: 0.15rem 0.55rem;
   font-size: 0.75rem;
   font-weight: 600;
-  background: rgba(31, 77, 58, 0.1);
+  background: color-mix(in srgb, var(--brand) 12%, transparent);
   color: var(--brand);
 }
 
 .badge.risk {
-  background: rgba(163, 59, 45, 0.12);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
   color: var(--danger);
 }
 
 .badge.warn {
-  background: rgba(183, 121, 31, 0.15);
+  background: color-mix(in srgb, var(--warn) 16%, transparent);
   color: var(--warn);
 }
 
@@ -147,6 +196,59 @@ select {
   height: 0.55rem;
   border-radius: 50%;
   display: inline-block;
+}
+
+.switch {
+  width: 46px;
+  height: 26px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--ink-muted) 25%, transparent);
+  position: relative;
+  cursor: pointer;
+  transition: background 0.2s ease;
+  padding: 0;
+}
+
+.switch[data-on="true"] {
+  background: var(--brand);
+}
+
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: white;
+  transition: transform 0.2s ease;
+}
+
+.switch[data-on="true"]::after {
+  transform: translateX(20px);
+}
+
+.palette-swatch {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+}
+
+.palette-swatch[data-active="true"] {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--brand) 35%, transparent);
+}
+
+.bucket-swatch {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
 }
 
 @keyframes rise-in {
@@ -170,12 +272,37 @@ select {
   }
 }
 
+@keyframes complete-glow {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 0%, transparent);
+    background: rgba(255, 255, 255, 0.55);
+    transform: scale(1);
+  }
+  35% {
+    box-shadow: 0 0 0 8px color-mix(in srgb, var(--ok) 25%, transparent),
+      0 0 28px color-mix(in srgb, var(--ok) 55%, transparent);
+    background: color-mix(in srgb, var(--ok) 22%, white);
+    transform: scale(1.02);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+    background: color-mix(in srgb, var(--ok) 35%, transparent);
+    opacity: 0;
+    transform: scale(0.96) translateY(-6px);
+  }
+}
+
 .rise {
   animation: rise-in 0.45s ease both;
 }
 
+.completing {
+  animation: complete-glow 0.85s ease forwards;
+  pointer-events: none;
+}
+
 .nav-active {
-  background: rgba(31, 77, 58, 0.12);
+  background: color-mix(in srgb, var(--brand) 14%, transparent);
   color: var(--brand);
 }
 
@@ -187,9 +314,12 @@ select {
 
 .bottom-nav {
   position: fixed;
-  left: 0.75rem;
-  right: 0.75rem;
+  left: max(0.75rem, calc(50% - (var(--shell-max) / 2) + 0.75rem));
+  right: max(0.75rem, calc(50% - (var(--shell-max) / 2) + 0.75rem));
   bottom: 0.75rem;
+  width: auto;
+  max-width: calc(var(--shell-max) - 1.5rem);
+  margin: 0 auto;
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 0.25rem;
@@ -200,6 +330,178 @@ select {
 .app-main {
   padding: 0 0.75rem 5.5rem;
   min-width: 0;
+  max-width: 100%;
+}
+
+.page-wrap {
+  width: min(100%, 820px);
+  margin: 0 auto;
+  display: grid;
+  gap: 1rem;
+}
+
+.page-wrap.wide {
+  width: 100%;
+  max-width: none;
+}
+
+.cal-page-vertical {
+  max-height: calc(100dvh - 5.5rem);
+  overflow: hidden;
+}
+
+.cal-horizontal {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.cal-horizontal-day {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.cal-horizontal-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.cal-horizontal-track {
+  position: relative;
+  height: 92px;
+}
+
+.cal-horizontal-hour {
+  position: absolute;
+  top: 0;
+  font-size: 0.68rem;
+  color: var(--ink-muted);
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.cal-horizontal-break,
+.cal-horizontal-item {
+  position: absolute;
+  top: 1.35rem;
+  height: 64px;
+  border-radius: 10px;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.82rem;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.cal-horizontal-break {
+  background: color-mix(in srgb, var(--ink-muted) 12%, transparent);
+  border: 1px dashed var(--line);
+  color: var(--ink-muted);
+  display: grid;
+  place-items: center;
+  font-size: 0.78rem;
+}
+
+.cal-horizontal-item.meeting {
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+}
+
+.cal-horizontal-item.task {
+  background: color-mix(in srgb, var(--brand) 12%, transparent);
+}
+
+.cal-vertical {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(160px, 1fr);
+  gap: 0.65rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  align-items: start;
+  max-height: calc(100dvh - 11rem);
+}
+
+.cal-vertical-day {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  max-height: 100%;
+}
+
+.cal-timeline {
+  position: relative;
+  overflow: hidden;
+}
+
+.cal-hour-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px dashed var(--line);
+  font-size: 0.68rem;
+  color: var(--ink-muted);
+  padding-left: 0.25rem;
+}
+
+.cal-break {
+  position: absolute;
+  left: 0.25rem;
+  right: 0.25rem;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--ink-muted) 12%, transparent);
+  border: 1px dashed var(--line);
+  font-size: 0.72rem;
+  color: var(--ink-muted);
+  display: grid;
+  place-items: center;
+}
+
+.task-fade-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.task-fade-card::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 0 45%;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--fade-color, var(--brand)) 28%, transparent) 100%
+  );
+  pointer-events: none;
+}
+
+.task-fade-card[data-has-header]::after {
+  background:
+    linear-gradient(90deg, transparent 0%, rgba(0, 0, 0, 0.12) 100%),
+    var(--fade-image) center right / cover no-repeat;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0%, black 55%);
+  mask-image: linear-gradient(90deg, transparent 0%, black 55%);
+}
+
+.dragging-item {
+  opacity: 0.45;
+  transform: scale(0.98);
+}
+
+.drag-ghost {
+  box-shadow: 0 18px 40px color-mix(in srgb, var(--brand) 25%, transparent);
+  transform: scale(1.03) rotate(1deg);
+  z-index: 5;
+  cursor: grabbing;
+}
+
+.horizontal-cal {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(180px, 1fr);
+  gap: 0.65rem;
+  overflow-x: auto;
+  padding-bottom: 0.35rem;
+  scroll-snap-type: x proximity;
+}
+
+.horizontal-cal > * {
+  scroll-snap-align: start;
 }
 
 @media (min-width: 900px) {
