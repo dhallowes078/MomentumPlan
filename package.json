@@ -13,7 +13,9 @@
     "db:migrate": "npm run db:migrate -w @momentum/web",
     "test": "npm run test -w @momentum/scheduler",
     "lint": "npm run lint -w @momentum/web",
-    "tunnel": "npx --yes cloudflared tunnel --url http://localhost:3000"
+    "tunnel": "npx --yes cloudflared tunnel --url http://localhost:3000",
+    "mobile:sync": "npm run sync -w @momentum/mobile",
+    "mobile:open": "npm run open -w @momentum/mobile"
   },
   "engines": {
     "node": ">=20"

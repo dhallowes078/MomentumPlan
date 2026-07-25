@@ -1,34 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { addDays, format, startOfDay } from "date-fns";
 import { RefreshCw } from "lucide-react";
 import { priorityColor } from "@/lib/format";
-import { cachedJson, invalidateClientCache } from "@/lib/client-fetch";
-
-type CalData = {
-  blocks: Array<{
-    id: string;
-    start: string;
-    end: string;
-    task: {
-      id: string;
-      title: string;
-      priority: number;
-      atRisk: boolean;
-      bucket?: { name: string; color: string } | null;
-    };
-  }>;
-  meetings: Array<{
-    id: string;
-    subject: string;
-    start: string;
-    end: string;
-    isMomentum: boolean;
-  }>;
-  outlookConnected: boolean;
-};
+import {
+  useLocalMeetings,
+  useLocalPrefs,
+  useLocalScheduleBlocks,
+} from "@/lib/local/hooks";
+import * as repo from "@/lib/local/repo";
+import { flushOutbox, pullFromServer } from "@/lib/local/sync";
 
 type TimedItem = {
   id: string;
@@ -73,21 +56,46 @@ function clockMinutes(iso: string) {
 }
 
 export default function CalendarPage() {
-  const [data, setData] = useState<CalData | null>(null);
+  const blocks = useLocalScheduleBlocks();
+  const meetings = useLocalMeetings();
+  const prefs = useLocalPrefs();
   const [scheduling, setScheduling] = useState(false);
   const [view, setView] = useState<"horizontal" | "vertical">("horizontal");
-  const [workDays, setWorkDays] = useState<number[]>([1, 2, 3, 4, 5]);
-  const [planningDays, setPlanningDays] = useState(14);
-  const [startMinutes, setStartMinutes] = useState(540);
-  const [endMinutes, setEndMinutes] = useState(1020);
-  const [breakStart, setBreakStart] = useState<number | null>(720);
-  const [breakEnd, setBreakEnd] = useState<number | null>(780);
   const [viewportH, setViewportH] = useState(800);
   const [nowMinutes, setNowMinutes] = useState(() => {
     const n = new Date();
     return n.getHours() * 60 + n.getMinutes();
   });
   const todayRef = useRef<HTMLDivElement | null>(null);
+
+  const workDays = prefs?.workDays?.length ? prefs.workDays : [1, 2, 3, 4, 5];
+  const planningDays = prefs?.planningDays ?? 14;
+  const startMinutes = prefs?.startMinutes ?? 540;
+  const endMinutes = prefs?.endMinutes ?? 1020;
+  const breakStart = prefs?.breakStartMinutes ?? null;
+  const breakEnd = prefs?.breakEndMinutes ?? null;
+
+  const data = useMemo(
+    () => ({
+      blocks: blocks.map((b) => ({
+        id: b.id,
+        start: b.start,
+        end: b.end,
+        task: {
+          id: b.task?.id ?? b.taskId,
+          title: b.task?.title ?? "Task",
+          priority: b.task?.priority ?? 3,
+          atRisk: b.task?.atRisk ?? false,
+          bucket: b.task?.bucket ?? null,
+        },
+      })),
+      meetings,
+      outlookConnected: meetings.length > 0,
+    }),
+    [blocks, meetings]
+  );
+
+  type CalData = typeof data;
 
   const today = useMemo(() => startOfDay(new Date()), []);
 
@@ -98,29 +106,6 @@ export default function CalendarPage() {
       .filter((day) => workDays.includes(day.getDay()))
       .slice(0, Math.max(workDays.length, planningDays));
   }, [today, workDays, planningDays]);
-
-  const load = useCallback(async (force = false) => {
-    const [cal, prefsPayload] = await Promise.all([
-      cachedJson<CalData>("/api/calendar?days=21", { softTtlMs: 20_000, force }),
-      cachedJson<{ prefs: Record<string, unknown> }>("/api/prefs", {
-        softTtlMs: 60_000,
-        force,
-      }),
-    ]);
-    setData(cal);
-    const prefs = prefsPayload.prefs ?? {};
-    const daysPref = Array.isArray(prefs.workDays) ? (prefs.workDays as number[]) : [1, 2, 3, 4, 5];
-    setWorkDays(daysPref.length ? daysPref : [1, 2, 3, 4, 5]);
-    setPlanningDays((prefs.planningDays as number | undefined) ?? 14);
-    setStartMinutes((prefs.startMinutes as number | undefined) ?? 540);
-    setEndMinutes((prefs.endMinutes as number | undefined) ?? 1020);
-    setBreakStart((prefs.breakStartMinutes as number | null | undefined) ?? null);
-    setBreakEnd((prefs.breakEndMinutes as number | null | undefined) ?? null);
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
 
   useEffect(() => {
     const tick = () => {
@@ -149,10 +134,9 @@ export default function CalendarPage() {
 
   async function reschedule() {
     setScheduling(true);
-    await fetch("/api/schedule/run", { method: "POST" });
-    invalidateClientCache("/api/calendar");
-    invalidateClientCache("/api/today");
-    await load(true);
+    await repo.enqueue({ type: "runScheduler" });
+    await flushOutbox();
+    await pullFromServer();
     setScheduling(false);
   }
 
@@ -171,13 +155,13 @@ export default function CalendarPage() {
     const dayStart = day;
     const dayEnd = addDays(day, 1);
     const meetings =
-      data?.meetings.filter((m) => {
+      data.meetings.filter((m) => {
         if (m.isMomentum) return false;
         const s = new Date(m.start);
         return s >= dayStart && s < dayEnd;
       }) ?? [];
     const blocks =
-      data?.blocks.filter((b) => {
+      data.blocks.filter((b) => {
         const s = new Date(b.start);
         return s >= dayStart && s < dayEnd;
       }) ?? [];

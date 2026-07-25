@@ -11,7 +11,8 @@ import { DueDatePicker } from "@/components/DueDatePicker";
 import { AssigneeSelect } from "@/components/AssigneeSelect";
 import { FileButton } from "@/components/FileButton";
 import { EmojiPicker } from "@/components/EmojiPicker";
-import { invalidateClientCache } from "@/lib/client-fetch";
+import { createLocalTask } from "@/lib/local/repo";
+import { flushOutbox, pullFromServer } from "@/lib/local/sync";
 
 type Member = {
   id: string;
@@ -184,75 +185,62 @@ export function NewTaskModal({
     if (!title.trim() || !workspaceId) return;
     setSaving(true);
 
-    const res = await fetch("/api/tasks", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        workspaceId,
-        title,
-        notes: mode === "full" && notes.trim() ? notes : null,
-        emoji: mode === "full" ? emoji : null,
-        priority,
-        estimateMinutes: Math.max(5, estimate),
-        bucketId: bucketId || null,
-        assigneeId: mode === "full" && assigneeId ? assigneeId : null,
-        dueAt: dueAt ? new Date(`${dueAt}T17:00:00`).toISOString() : null,
-        links: mode === "full" && links.length ? links : undefined,
-        isRecurring: mode === "full" ? isRecurring : false,
-        recurFreq: mode === "full" && isRecurring ? recurFreq : null,
-        recurInterval: mode === "full" && isRecurring ? recurInterval : 1,
-        recurEndsAt:
-          mode === "full" && isRecurring && recurEndsAt
-            ? new Date(`${recurEndsAt}T23:59:59`).toISOString()
-            : null,
-        recurCount:
-          mode === "full" && isRecurring && recurCount ? Number(recurCount) : null,
-      }),
+    const local = await createLocalTask({
+      workspaceId,
+      title,
+      notes: mode === "full" && notes.trim() ? notes : null,
+      emoji: mode === "full" ? emoji : null,
+      priority,
+      estimateMinutes: Math.max(5, estimate),
+      bucketId: bucketId || null,
+      assigneeId: mode === "full" && assigneeId ? assigneeId : null,
+      dueAt: dueAt ? new Date(`${dueAt}T17:00:00`).toISOString() : null,
+      links: mode === "full" && links.length ? links : undefined,
+      isRecurring: mode === "full" ? isRecurring : false,
+      recurFreq: mode === "full" && isRecurring ? recurFreq : null,
+      recurInterval: mode === "full" && isRecurring ? recurInterval : 1,
+      recurEndsAt:
+        mode === "full" && isRecurring && recurEndsAt
+          ? new Date(`${recurEndsAt}T23:59:59`).toISOString()
+          : null,
+      recurCount:
+        mode === "full" && isRecurring && recurCount ? Number(recurCount) : null,
+      checklist: mode === "full" ? checklist.filter((c) => c.text.trim()) : undefined,
+      mentionIds: mode === "full" && mentionIds.length ? mentionIds : undefined,
     });
 
-    if (!res.ok) {
-      setSaving(false);
-      return;
+    await flushOutbox();
+    await pullFromServer();
+
+    const { getTask } = await import("@/lib/local/repo");
+    const { localDb } = await import("@/lib/local/db");
+    let taskId = local.id;
+    const stillLocal = await getTask(local.id);
+    if (!stillLocal || stillLocal._localOnly) {
+      const all = await localDb.tasks.where("workspaceId").equals(workspaceId).toArray();
+      const match = all.find((t) => t.title === local.title && !t._localOnly);
+      if (match) taskId = match.id;
+    } else {
+      taskId = stillLocal.id;
     }
 
-    const { task } = await res.json();
-    const taskId: string = task.id;
-
-    if (mode === "full") {
+    if (mode === "full" && !taskId.startsWith("local_")) {
       if (headerFile) {
         await uploadHeader(taskId, headerFile);
       }
-
       for (const doc of docs) {
         await uploadFile(taskId, doc);
-      }
-
-      const cleanChecklist = checklist.filter((c) => c.text.trim());
-      if (cleanChecklist.length) {
-        await fetch(`/api/tasks/${taskId}/checklist`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ items: cleanChecklist }),
-        });
-      }
-
-      if (mentionIds.length) {
-        await fetch(`/api/tasks/${taskId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ mentionIds }),
-        });
       }
     }
 
     setSaving(false);
     reset();
-    invalidateClientCache("/api/tasks");
-    invalidateClientCache("/api/today");
-    invalidateClientCache("/api/status");
-    invalidateClientCache("/api/calendar");
     onClose();
-    router.push(`/tasks/${taskId}`);
+    if (!taskId.startsWith("local_")) {
+      router.push(`/tasks/${taskId}`);
+    } else {
+      router.push("/tasks");
+    }
     router.refresh();
   }
 

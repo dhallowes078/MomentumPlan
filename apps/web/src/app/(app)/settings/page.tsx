@@ -5,6 +5,12 @@ import { signIn, signOut } from "next-auth/react";
 import { Check, Copy, FlaskConical, RefreshCw, Trash2 } from "lucide-react";
 import { THEME_PRESETS } from "@/lib/theme";
 import { useThemePrefs } from "@/components/ThemeProvider";
+import { putPrefs as putLocalPrefs } from "@/lib/local/repo";
+import {
+  requestNotificationPermission,
+  rescheduleTaskNotifications,
+} from "@/lib/local/notifications";
+import { flushOutbox } from "@/lib/local/sync";
 
 type Prefs = {
   workDays: number[];
@@ -22,6 +28,10 @@ type Prefs = {
   bigMinutes: number;
   themeColor: string;
   darkMode: boolean;
+  notificationsEnabled?: boolean;
+  notificationSnoozeMinutes?: number;
+  quietHoursStart?: number | null;
+  quietHoursEnd?: number | null;
 };
 
 type Bucket = { id: string; name: string; color: string };
@@ -66,6 +76,7 @@ const PROFILE_COLORS = ["#3D6B4F", "#2F5D8C", "#8B5E3C", "#7A2E3A", "#0F766E", "
 const TABS = [
   { id: "profile", label: "Profile" },
   { id: "devices", label: "Devices" },
+  { id: "notifications", label: "Notifications" },
   { id: "appearance", label: "Appearance" },
   { id: "sizes", label: "Sizes" },
   { id: "schedule", label: "Schedule" },
@@ -188,11 +199,29 @@ export default function SettingsPage() {
       mediumMinutes: payload.mediumMinutes,
       bigMinutes: payload.bigMinutes,
     });
-    await fetch("/api/prefs", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+    await putLocalPrefs({
+      workDays: payload.workDays,
+      startMinutes: payload.startMinutes,
+      endMinutes: payload.endMinutes,
+      breakStartMinutes: payload.breakStartMinutes,
+      breakEndMinutes: payload.breakEndMinutes,
+      planningDays: payload.planningDays,
+      minChunkMinutes: payload.minChunkMinutes,
+      bufferMinutes: payload.bufferMinutes,
+      timezone: payload.timezone,
+      tinyMinutes: payload.tinyMinutes,
+      smallMinutes: payload.smallMinutes,
+      mediumMinutes: payload.mediumMinutes,
+      bigMinutes: payload.bigMinutes,
+      themeColor: payload.themeColor,
+      darkMode: payload.darkMode,
+      notificationsEnabled: payload.notificationsEnabled !== false,
+      notificationSnoozeMinutes: payload.notificationSnoozeMinutes ?? 10,
+      quietHoursStart: payload.quietHoursStart ?? null,
+      quietHoursEnd: payload.quietHoursEnd ?? null,
     });
+    await flushOutbox();
+    await rescheduleTaskNotifications();
     setSaved(true);
     setTimeout(() => setSaved(false), 1500);
   }
@@ -486,6 +515,94 @@ export default function SettingsPage() {
           </div>
         </div>
       </section>
+
+      {prefs && (
+        <section
+          id="settings-notifications"
+          className="card settings-section"
+          style={{ padding: "1rem", display: "grid", gap: "0.85rem" }}
+        >
+          <h2 style={{ margin: 0, fontSize: "1rem" }}>Task notifications</h2>
+          <p style={{ margin: 0, color: "var(--ink-muted)", fontSize: "0.9rem" }}>
+            On the Android app, Momentum asks at the start and end of each scheduled block whether
+            you have started or finished. Enable notifications and set quiet hours if needed.
+          </p>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "1rem" }}>
+            <div>
+              <strong>Start / finish prompts</strong>
+              <div style={{ color: "var(--ink-muted)", fontSize: "0.85rem" }}>
+                Persistent questions on scheduled tasks
+              </div>
+            </div>
+            <button
+              type="button"
+              className="switch"
+              data-on={prefs.notificationsEnabled !== false ? "true" : "false"}
+              aria-pressed={prefs.notificationsEnabled !== false}
+              onClick={() =>
+                void savePrefs({ notificationsEnabled: prefs.notificationsEnabled === false })
+              }
+            />
+          </div>
+          <label style={{ display: "grid", gap: "0.35rem", fontSize: "0.85rem" }}>
+            Snooze length (minutes)
+            <input
+              className="field"
+              type="number"
+              min={5}
+              max={120}
+              value={prefs.notificationSnoozeMinutes ?? 10}
+              onChange={(e) =>
+                setPrefs({ ...prefs, notificationSnoozeMinutes: Number(e.target.value) || 10 })
+              }
+              onBlur={() =>
+                void savePrefs({ notificationSnoozeMinutes: prefs.notificationSnoozeMinutes ?? 10 })
+              }
+            />
+          </label>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+            <label style={{ display: "grid", gap: "0.35rem", fontSize: "0.85rem" }}>
+              Quiet hours start
+              <input
+                className="field"
+                type="time"
+                value={
+                  prefs.quietHoursStart != null ? minutesToInput(prefs.quietHoursStart) : ""
+                }
+                onChange={(e) =>
+                  setPrefs({
+                    ...prefs,
+                    quietHoursStart: e.target.value ? inputToMinutes(e.target.value) : null,
+                  })
+                }
+                onBlur={() => void savePrefs()}
+              />
+            </label>
+            <label style={{ display: "grid", gap: "0.35rem", fontSize: "0.85rem" }}>
+              Quiet hours end
+              <input
+                className="field"
+                type="time"
+                value={prefs.quietHoursEnd != null ? minutesToInput(prefs.quietHoursEnd) : ""}
+                onChange={(e) =>
+                  setPrefs({
+                    ...prefs,
+                    quietHoursEnd: e.target.value ? inputToMinutes(e.target.value) : null,
+                  })
+                }
+                onBlur={() => void savePrefs()}
+              />
+            </label>
+          </div>
+          <button
+            type="button"
+            className="btn secondary"
+            onClick={() => void requestNotificationPermission().then(() => rescheduleTaskNotifications())}
+          >
+            Allow notification permission
+          </button>
+        </section>
+      )}
 
       {prefs && (
         <>
@@ -965,10 +1082,12 @@ export default function SettingsPage() {
       </section>
 
       <section id="settings-phone" className="card settings-section" style={{ padding: "1rem" }}>
-        <h2 style={{ margin: "0 0 0.5rem", fontSize: "1rem" }}>Phone / PWA</h2>
-        <p style={{ margin: 0, color: "var(--ink-muted)", fontSize: "0.9rem" }}>
-          On your phone, open this site in Safari/Chrome and use “Add to Home Screen” for the
-          Momentum portal. Use your device code from the Devices tab to sign in.
+        <h2 style={{ margin: "0 0 0.5rem", fontSize: "1rem" }}>Phone app</h2>
+        <p style={{ margin: "0 0 0.65rem", color: "var(--ink-muted)", fontSize: "0.9rem" }}>
+          Momentum is local-first: the UI reads from this device and syncs to the cloud when you
+          save. For start/finish task notifications, install the Android app from{" "}
+          <code>apps/mobile</code> (Capacitor). You can also Add to Home Screen for a PWA shell.
+          Sign in with your 6-digit device code from the Devices tab.
         </p>
       </section>
 

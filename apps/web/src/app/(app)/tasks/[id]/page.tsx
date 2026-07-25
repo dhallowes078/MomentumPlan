@@ -24,6 +24,8 @@ import { AssigneeSelect } from "@/components/AssigneeSelect";
 import { FileButton } from "@/components/FileButton";
 import { EmojiPicker } from "@/components/EmojiPicker";
 import { cachedJson, invalidateClientCache } from "@/lib/client-fetch";
+import * as localRepo from "@/lib/local/repo";
+import { flushOutbox, pullFromServer } from "@/lib/local/sync";
 
 type Member = {
   id: string;
@@ -317,26 +319,31 @@ export default function TaskDetailPage() {
       if (mentionsDirty) body.mentionIds = mentionIds;
 
       if (Object.keys(body).length > 0) {
-        await fetch(`/api/tasks/${params.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
+        await localRepo.patchLocalTask(String(params.id), {
+          title: (body.title as string) ?? draft.title,
+          notes: (body.notes as string | null) ?? draft.notes,
+          priority: (body.priority as number) ?? draft.priority,
+          estimateMinutes: (body.estimateMinutes as number) ?? draft.estimateMinutes,
+          dueAt: (body.dueAt as string | null) ?? draft.dueAt,
+          bucketId: (body.bucketId as string | null) ?? draft.bucketId,
+          assigneeId: (body.assigneeId as string | null) ?? draft.assigneeId,
+          locked: (body.locked as boolean) ?? draft.locked,
+          allowSplit: (body.allowSplit as boolean) ?? draft.allowSplit,
+          emoji: (body.emoji as string | null) ?? draft.emoji,
+          headerImageKey: (body.headerImageKey as string | null) ?? draft.headerImageKey,
+        }, body);
       }
 
       if (checklistDirty) {
-        await fetch(`/api/tasks/${params.id}/checklist`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ items: checklist }),
+        await localRepo.enqueue({
+          type: "putChecklist",
+          taskId: String(params.id),
+          items: checklist,
         });
       }
 
-      invalidateClientCache(`/api/tasks/${params.id}`);
-      invalidateClientCache("/api/tasks");
-      invalidateClientCache("/api/today");
-      invalidateClientCache("/api/status");
-      invalidateClientCache("/api/calendar");
+      await flushOutbox();
+      await pullFromServer();
       await load(true);
     } finally {
       setSaving(false);
@@ -345,29 +352,25 @@ export default function TaskDetailPage() {
 
   async function completeTask() {
     setCompleting(true);
-    await fetch(`/api/tasks/${params.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: "DONE" }),
-    });
-    invalidateClientCache("/api/tasks");
-    invalidateClientCache("/api/today");
-    invalidateClientCache("/api/status");
-    invalidateClientCache("/api/calendar");
+    await localRepo.patchLocalTask(
+      String(params.id),
+      { status: "DONE", completedAt: new Date().toISOString() },
+      { status: "DONE" }
+    );
+    await flushOutbox();
     window.setTimeout(() => {
       router.push("/tasks");
     }, 850);
   }
 
   async function reopenTask() {
-    await fetch(`/api/tasks/${params.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: "TODO" }),
-    });
-    invalidateClientCache("/api/tasks");
-    invalidateClientCache("/api/today");
-    invalidateClientCache("/api/status");
+    await localRepo.patchLocalTask(
+      String(params.id),
+      { status: "TODO", completedAt: null },
+      { status: "TODO" }
+    );
+    await flushOutbox();
+    await pullFromServer();
     await load(true);
   }
 

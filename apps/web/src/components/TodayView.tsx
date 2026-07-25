@@ -1,88 +1,47 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Check, GripVertical, RefreshCw, TriangleAlert } from "lucide-react";
 import { formatMinutes, formatTime, priorityColor } from "@/lib/format";
-import { cachedJson, invalidateClientCache } from "@/lib/client-fetch";
-
-type Block = {
-  id: string;
-  start: string;
-  end: string;
-  task: {
-    id: string;
-    title: string;
-    priority: number;
-    atRisk: boolean;
-    estimateMinutes: number;
-    bucket?: { name: string; color: string } | null;
-  };
-};
-
-type Task = {
-  id: string;
-  title: string;
-  priority: number;
-  atRisk: boolean;
-  estimateMinutes: number;
-  bucket?: { name: string; color: string } | null;
-};
+import { useLocalToday } from "@/lib/local/hooks";
+import * as repo from "@/lib/local/repo";
+import { flushOutbox, pullFromServer } from "@/lib/local/sync";
 
 export function TodayView() {
-  const [blocks, setBlocks] = useState<Block[]>([]);
-  const [backlog, setBacklog] = useState<Task[]>([]);
-  const [atRisk, setAtRisk] = useState<Task[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { blocks: liveBlocks, backlog, atRisk } = useLocalToday();
+  const [blocks, setBlocks] = useState(liveBlocks);
   const [scheduling, setScheduling] = useState(false);
   const [completingId, setCompletingId] = useState<string | null>(null);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [overIndex, setOverIndex] = useState<number | null>(null);
   const dragOriginIndex = useRef<number | null>(null);
-  const blocksAtDragStart = useRef<Block[]>([]);
-
-  const load = useCallback(async (force = false) => {
-    try {
-      const data = await cachedJson<{
-        blocks: Block[];
-        backlog: Task[];
-        atRisk: Task[];
-      }>("/api/today", { softTtlMs: 10_000, force });
-      setBlocks(data.blocks);
-      setBacklog(data.backlog);
-      setAtRisk(data.atRisk);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const blocksAtDragStart = useRef(liveBlocks);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (dragIndex == null) setBlocks(liveBlocks);
+  }, [liveBlocks, dragIndex]);
 
   async function reschedule() {
     setScheduling(true);
-    await fetch("/api/schedule/run", { method: "POST" });
-    invalidateClientCache("/api/today");
-    invalidateClientCache("/api/status");
-    await load(true);
+    await repo.enqueue({ type: "runScheduler" });
+    await flushOutbox();
+    await pullFromServer();
     setScheduling(false);
   }
 
   async function complete(taskId: string) {
     setCompletingId(taskId);
-    await fetch(`/api/tasks/${taskId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: "DONE" }),
-    });
-    invalidateClientCache("/api/today");
-    invalidateClientCache("/api/tasks");
-    invalidateClientCache("/api/status");
+    await repo.patchLocalTask(
+      taskId,
+      { status: "DONE", completedAt: new Date().toISOString() },
+      { status: "DONE" }
+    );
     window.setTimeout(async () => {
-      await load(true);
+      await flushOutbox();
+      await pullFromServer();
       setCompletingId(null);
-    }, 850);
+    }, 400);
   }
 
   function onDragStart(index: number) {
@@ -104,7 +63,7 @@ export function TodayView() {
     });
   }
 
-  function crossedDifferentPriority(from: number, to: number, start: Block[]) {
+  function crossedDifferentPriority(from: number, to: number, start: typeof blocks) {
     if (from === to) return false;
     const moved = start[from];
     if (!moved) return false;
@@ -112,7 +71,7 @@ export function TodayView() {
     const hi = Math.max(from, to);
     for (let i = lo; i <= hi; i++) {
       if (i === from) continue;
-      if (start[i]?.task.priority !== moved.task.priority) return true;
+      if (start[i]?.task?.priority !== moved.task?.priority) return true;
     }
     return false;
   }
@@ -128,14 +87,14 @@ export function TodayView() {
     setOverIndex(null);
 
     if (from == null || to == null || from === to) {
-      await load();
+      setBlocks(liveBlocks);
       return;
     }
 
     const orderChanged =
       start.map((b) => b.id).join("|") !== next.map((b) => b.id).join("|");
     if (!orderChanged) {
-      await load();
+      setBlocks(liveBlocks);
       return;
     }
 
@@ -145,7 +104,7 @@ export function TodayView() {
       : "Save this new agenda order?";
 
     if (!window.confirm(message)) {
-      await load();
+      setBlocks(liveBlocks);
       return;
     }
 
@@ -153,20 +112,19 @@ export function TodayView() {
     const updates = next.map((b, i) => {
       const priority = applyPriorities
         ? Math.max(1, Math.min(5, 5 - Math.floor((i / Math.max(next.length - 1, 1)) * 4)))
-        : b.task.priority;
-      return { id: b.task.id, priority, position: i };
+        : (b.task?.priority ?? 3);
+      return { id: b.task!.id, priority, position: i };
     });
 
+    for (const u of updates) {
+      await repo.patchLocalTask(u.id, { priority: u.priority, position: u.position });
+    }
     await fetch("/api/tasks/reorder", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ updates }),
     });
-    await load();
-  }
-
-  if (loading) {
-    return <p style={{ color: "var(--ink-muted)" }}>Loading today’s plan…</p>;
+    await pullFromServer();
   }
 
   return (
@@ -184,10 +142,10 @@ export function TodayView() {
             Today
           </h1>
           <p style={{ margin: "0.35rem 0 0", color: "var(--ink-muted)" }}>
-            Drag by the grip handle (⋮⋮) to reorder — you’ll get a confirmation before it saves.
+            Local-first — changes save to this device, then sync to the cloud.
           </p>
         </div>
-        <button className="btn secondary" onClick={reschedule} disabled={scheduling}>
+        <button className="btn secondary" onClick={() => void reschedule()} disabled={scheduling}>
           <RefreshCw size={16} />
           {scheduling ? "Packing…" : "Reschedule"}
         </button>
@@ -230,7 +188,7 @@ export function TodayView() {
             {blocks.map((b, i) => (
               <div
                 key={b.id}
-                className={`${completingId === b.task.id ? "completing" : "rise"} ${
+                className={`${completingId === b.task?.id ? "completing" : "rise"} ${
                   dragIndex === i ? "drag-ghost" : overIndex === i && dragIndex != null ? "dragging-item" : ""
                 }`}
                 onDragOver={(e) => {
@@ -245,7 +203,7 @@ export function TodayView() {
                   padding: "0.75rem",
                   borderRadius: "12px",
                   background: "color-mix(in srgb, var(--bg-elevated) 70%, transparent)",
-                  borderLeft: b.task.bucket
+                  borderLeft: b.task?.bucket
                     ? `4px solid ${b.task.bucket.color}`
                     : "4px solid transparent",
                   animationDelay: `${i * 40}ms`,
@@ -274,22 +232,28 @@ export function TodayView() {
                   <div>{formatTime(b.start)}</div>
                   <div>{formatTime(b.end)}</div>
                 </div>
-                <Link href={`/tasks/${b.task.id}`}>
+                <Link href={`/tasks/${b.task!.id}`}>
                   <div style={{ display: "flex", alignItems: "center", gap: "0.45rem" }}>
-                    <span className="priority-dot" style={{ background: priorityColor(b.task.priority) }} />
-                    <strong>{b.task.title}</strong>
-                    {b.task.atRisk && <span className="badge risk">due pressure</span>}
+                    <span
+                      className="priority-dot"
+                      style={{ background: priorityColor(b.task?.priority ?? 3) }}
+                    />
+                    <strong>
+                      {b.task?.emoji ? `${b.task.emoji} ` : ""}
+                      {b.task?.title}
+                    </strong>
+                    {b.task?.atRisk && <span className="badge risk">due pressure</span>}
                   </div>
                   <div style={{ fontSize: "0.8rem", color: "var(--ink-muted)", marginTop: "0.2rem" }}>
-                    {formatMinutes(b.task.estimateMinutes)}
-                    {b.task.bucket ? ` · ${b.task.bucket.name}` : ""} · {b.task.priority}
+                    {formatMinutes(b.task?.estimateMinutes ?? 0)}
+                    {b.task?.bucket ? ` · ${b.task.bucket.name}` : ""} · P{b.task?.priority}
                   </div>
                 </Link>
                 <button
                   className="btn ghost"
                   title="Complete"
-                  onClick={() => complete(b.task.id)}
-                  disabled={completingId === b.task.id}
+                  onClick={() => void complete(b.task!.id)}
+                  disabled={completingId === b.task?.id}
                 >
                   <Check size={18} />
                 </button>
@@ -318,7 +282,10 @@ export function TodayView() {
               >
                 <span className="priority-dot" style={{ background: priorityColor(t.priority) }} />
                 {t.bucket && <span className="bucket-swatch" style={{ background: t.bucket.color }} />}
-                <span style={{ flex: 1 }}>{t.title}</span>
+                <span style={{ flex: 1 }}>
+                  {t.emoji ? `${t.emoji} ` : ""}
+                  {t.title}
+                </span>
                 <span style={{ color: "var(--ink-muted)", fontSize: "0.8rem" }}>
                   {formatMinutes(t.estimateMinutes)}
                 </span>

@@ -3,10 +3,11 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CalendarDays, CheckSquare, Plus, Settings2, SunMedium } from "lucide-react";
+import { CalendarDays, CheckSquare, Cloud, CloudOff, Plus, Settings2, SunMedium } from "lucide-react";
 import clsx from "clsx";
 import { NewTaskModal } from "@/components/NewTaskModal";
 import { TrafficLights } from "@/components/TrafficLights";
+import { LocalDataProvider, useSync } from "@/components/LocalDataProvider";
 
 const links = [
   { href: "/today", label: "Today", icon: SunMedium },
@@ -15,7 +16,33 @@ const links = [
   { href: "/settings", label: "More", icon: Settings2 },
 ];
 
-export function AppShell({
+function SyncBadge() {
+  const { status, pending, refresh } = useSync();
+  const label =
+    status === "offline"
+      ? "Offline"
+      : status === "syncing"
+        ? "Saving…"
+        : status === "error"
+          ? "Sync issue"
+          : pending > 0
+            ? `${pending} pending`
+            : "Synced";
+  return (
+    <button
+      type="button"
+      className="btn ghost compact"
+      title="Sync with cloud"
+      onClick={() => void refresh()}
+      style={{ fontSize: "0.72rem", color: "var(--ink-muted)" }}
+    >
+      {status === "offline" || status === "error" ? <CloudOff size={14} /> : <Cloud size={14} />}
+      {label}
+    </button>
+  );
+}
+
+function AppShellInner({
   children,
   userName,
 }: {
@@ -27,6 +54,12 @@ export function AppShell({
   const [newTaskMode, setNewTaskMode] = useState<"simple" | "full">("full");
 
   useEffect(() => {
+    if ("serviceWorker" in navigator) {
+      void navigator.serviceWorker.register("/sw.js").catch(() => undefined);
+    }
+    void import("@/lib/local/notifications")
+      .then((m) => m.initNotifications())
+      .catch(() => undefined);
     const id = window.setInterval(() => {
       void fetch("/api/schedule/run", { method: "POST" });
     }, 300_000);
@@ -63,7 +96,10 @@ export function AppShell({
             {userName ? `Plan for ${userName}` : "Auto-plan your day"}
           </div>
         </div>
-        <TrafficLights />
+        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+          <SyncBadge />
+          <TrafficLights />
+        </div>
         <button
           className="btn"
           onClick={() => {
@@ -132,5 +168,19 @@ export function AppShell({
         onClose={() => setNewTaskOpen(false)}
       />
     </div>
+  );
+}
+
+export function AppShell({
+  children,
+  userName,
+}: {
+  children: React.ReactNode;
+  userName?: string | null;
+}) {
+  return (
+    <LocalDataProvider>
+      <AppShellInner userName={userName}>{children}</AppShellInner>
+    </LocalDataProvider>
   );
 }

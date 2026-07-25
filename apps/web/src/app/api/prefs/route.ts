@@ -33,6 +33,10 @@ const schema = z.object({
   bigMinutes: z.number().int().min(5).max(8 * 60).optional(),
   themeColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
   darkMode: z.boolean().optional(),
+  notificationsEnabled: z.boolean().optional(),
+  notificationSnoozeMinutes: z.number().int().min(5).max(120).optional(),
+  quietHoursStart: z.number().int().min(0).max(24 * 60 - 1).nullable().optional(),
+  quietHoursEnd: z.number().int().min(0).max(24 * 60 - 1).nullable().optional(),
 });
 
 export async function PATCH(req: Request) {

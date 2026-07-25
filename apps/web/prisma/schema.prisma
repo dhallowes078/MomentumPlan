@@ -330,6 +330,10 @@ model SchedulePrefs {
   bigMinutes        Int     @default(120)
   themeColor        String  @default("#1f4d3a")
   darkMode          Boolean @default(false)
+  notificationsEnabled  Boolean @default(true)
+  notificationSnoozeMinutes Int @default(10)
+  quietHoursStart     Int?
+  quietHoursEnd       Int?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
