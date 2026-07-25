@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
 import { X } from "lucide-react";
 import { formatMinutes, priorityColor } from "@/lib/format";
+import { cachedJson } from "@/lib/client-fetch";
 
 type StatusTask = {
   id: string;
@@ -29,7 +29,6 @@ type Status = {
 type Filter = "onTime" | "pushed" | "overdue";
 
 export function TrafficLights() {
-  const pathname = usePathname();
   const [status, setStatus] = useState<Status>({
     onTime: 0,
     pushed: 0,
@@ -38,11 +37,13 @@ export function TrafficLights() {
   });
   const [open, setOpen] = useState<Filter | null>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (force = false) => {
     try {
-      const res = await fetch("/api/status");
-      if (!res.ok) return;
-      setStatus(await res.json());
+      const data = await cachedJson<Status>("/api/status", {
+        softTtlMs: 30_000,
+        force,
+      });
+      setStatus(data);
     } catch {
       // ignore while signed out / booting
     }
@@ -50,9 +51,9 @@ export function TrafficLights() {
 
   useEffect(() => {
     void load();
-    const id = window.setInterval(() => void load(), 60_000);
+    const id = window.setInterval(() => void load(true), 60_000);
     return () => window.clearInterval(id);
-  }, [load, pathname]);
+  }, [load]);
 
   const lights = [
     {

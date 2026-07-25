@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Plus, RotateCcw } from "lucide-react";
 import { formatMinutes, priorityColor } from "@/lib/format";
 import { NewTaskModal } from "@/components/NewTaskModal";
+import { cachedJson, invalidateClientCache } from "@/lib/client-fetch";
 
 type Workspace = {
   id: string;
@@ -51,18 +52,26 @@ export default function TasksPage() {
     [workspaces, workspaceId]
   );
 
-  const load = useCallback(async () => {
-    const ws = await fetch("/api/workspaces").then((r) => r.json());
+  const load = useCallback(async (force = false) => {
+    const ws = await cachedJson<{ workspaces: Workspace[] }>("/api/workspaces", {
+      softTtlMs: 60_000,
+      force,
+    });
     setWorkspaces(ws.workspaces);
     const wid = workspaceId || ws.workspaces[0]?.id;
     if (!wid) return;
     if (!workspaceId) setWorkspaceId(wid);
     const [data, detail] = await Promise.all([
-      fetch(`/api/tasks?${new URLSearchParams({ workspaceId: wid })}`).then((r) => r.json()),
-      fetch(`/api/workspaces/${wid}`).then((r) => r.json()),
+      cachedJson<{ tasks: Task[] }>(`/api/tasks?${new URLSearchParams({ workspaceId: wid })}`, {
+        softTtlMs: 12_000,
+        force,
+      }),
+      cachedJson<{
+        workspace?: { members?: { user: Member }[]; buckets?: Workspace["buckets"] };
+      }>(`/api/workspaces/${wid}`, { softTtlMs: 60_000, force }),
     ]);
     setTasks(data.tasks);
-    setMembers(detail.workspace?.members?.map((m: { user: Member }) => m.user) ?? []);
+    setMembers(detail.workspace?.members?.map((m) => m.user) ?? []);
   }, [workspaceId]);
 
   useEffect(() => {
@@ -75,7 +84,10 @@ export default function TasksPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: "TODO" }),
     });
-    await load();
+    invalidateClientCache("/api/tasks");
+    invalidateClientCache("/api/today");
+    invalidateClientCache("/api/status");
+    await load(true);
   }
 
   const visible = tasks.filter((t) => {

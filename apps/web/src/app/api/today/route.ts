@@ -12,18 +12,20 @@ export async function GET() {
   const from = startOfDay(now);
   const to = endOfDay(now);
 
-  // Push incomplete blocks only after their timeslot has ended (overrun).
-  const stale = await prisma.scheduleBlock.count({
-    where: {
-      userId,
-      end: { lt: now },
-      completed: false,
-      task: { status: { in: ["TODO", "IN_PROGRESS"] } },
-    },
-  });
-  if (stale > 0) {
-    await runSchedulerForUser(userId).catch(console.error);
-  }
+  // Don't block the Today read on a full reschedule — kick it off in the background.
+  void prisma.scheduleBlock
+    .count({
+      where: {
+        userId,
+        end: { lt: now },
+        completed: false,
+        task: { status: { in: ["TODO", "IN_PROGRESS"] } },
+      },
+    })
+    .then((stale) => {
+      if (stale > 0) return runSchedulerForUser(userId);
+    })
+    .catch(console.error);
 
   const blocks = await prisma.scheduleBlock.findMany({
     where: { userId, start: { lt: to }, end: { gt: from } },

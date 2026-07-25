@@ -11,6 +11,7 @@ import { DueDatePicker } from "@/components/DueDatePicker";
 import { AssigneeSelect } from "@/components/AssigneeSelect";
 import { FileButton } from "@/components/FileButton";
 import { EmojiPicker } from "@/components/EmojiPicker";
+import { invalidateClientCache } from "@/lib/client-fetch";
 
 type Member = {
   id: string;
@@ -246,6 +247,10 @@ export function NewTaskModal({
 
     setSaving(false);
     reset();
+    invalidateClientCache("/api/tasks");
+    invalidateClientCache("/api/today");
+    invalidateClientCache("/api/status");
+    invalidateClientCache("/api/calendar");
     onClose();
     router.push(`/tasks/${taskId}`);
     router.refresh();

@@ -82,14 +82,35 @@ export async function GET(
     ? await getFileUrl(task.headerImageKey)
     : null;
 
-  const attachments = await Promise.all(
-    task.attachments
-      .filter((a) => a.storageKey !== task.headerImageKey)
-      .map(async (a) => ({
-        ...a,
-        url: await getFileUrl(a.storageKey),
-      }))
-  );
+  const [attachments, workspace] = await Promise.all([
+    Promise.all(
+      task.attachments
+        .filter((a) => a.storageKey !== task.headerImageKey)
+        .map(async (a) => ({
+          ...a,
+          url: await getFileUrl(a.storageKey),
+        }))
+    ),
+    prisma.workspace.findUnique({
+      where: { id: task.workspaceId },
+      select: {
+        buckets: { orderBy: { position: "asc" } },
+        members: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                image: true,
+                color: true,
+              },
+            },
+          },
+        },
+      },
+    }),
+  ]);
 
   return NextResponse.json({
     task: {
@@ -97,6 +118,12 @@ export async function GET(
       headerImageUrl,
       attachments,
     },
+    workspace: workspace
+      ? {
+          buckets: workspace.buckets,
+          members: workspace.members.map((m) => m.user),
+        }
+      : { buckets: [], members: [] },
   });
 }
 

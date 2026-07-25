@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Check, GripVertical, RefreshCw, TriangleAlert } from "lucide-react";
 import { formatMinutes, formatTime, priorityColor } from "@/lib/format";
+import { cachedJson, invalidateClientCache } from "@/lib/client-fetch";
 
 type Block = {
   id: string;
@@ -40,29 +41,31 @@ export function TodayView() {
   const dragOriginIndex = useRef<number | null>(null);
   const blocksAtDragStart = useRef<Block[]>([]);
 
-  const load = useCallback(async () => {
-    const res = await fetch("/api/today");
-    if (!res.ok) return;
-    const data = await res.json();
-    setBlocks(data.blocks);
-    setBacklog(data.backlog);
-    setAtRisk(data.atRisk);
-    setLoading(false);
+  const load = useCallback(async (force = false) => {
+    try {
+      const data = await cachedJson<{
+        blocks: Block[];
+        backlog: Task[];
+        atRisk: Task[];
+      }>("/api/today", { softTtlMs: 10_000, force });
+      setBlocks(data.blocks);
+      setBacklog(data.backlog);
+      setAtRisk(data.atRisk);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
     void load();
-    const id = setInterval(async () => {
-      await fetch("/api/schedule/run", { method: "POST" });
-      await load();
-    }, 300_000);
-    return () => clearInterval(id);
   }, [load]);
 
   async function reschedule() {
     setScheduling(true);
     await fetch("/api/schedule/run", { method: "POST" });
-    await load();
+    invalidateClientCache("/api/today");
+    invalidateClientCache("/api/status");
+    await load(true);
     setScheduling(false);
   }
 
@@ -73,8 +76,11 @@ export function TodayView() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: "DONE" }),
     });
+    invalidateClientCache("/api/today");
+    invalidateClientCache("/api/tasks");
+    invalidateClientCache("/api/status");
     window.setTimeout(async () => {
-      await load();
+      await load(true);
       setCompletingId(null);
     }, 850);
   }

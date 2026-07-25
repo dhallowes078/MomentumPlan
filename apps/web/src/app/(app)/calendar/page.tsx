@@ -5,6 +5,7 @@ import Link from "next/link";
 import { addDays, format, startOfDay } from "date-fns";
 import { RefreshCw } from "lucide-react";
 import { priorityColor } from "@/lib/format";
+import { cachedJson, invalidateClientCache } from "@/lib/client-fetch";
 
 type CalData = {
   blocks: Array<{
@@ -98,22 +99,23 @@ export default function CalendarPage() {
       .slice(0, Math.max(workDays.length, planningDays));
   }, [today, workDays, planningDays]);
 
-  const load = useCallback(async () => {
-    const [calRes, prefsRes] = await Promise.all([
-      fetch("/api/calendar?days=21"),
-      fetch("/api/prefs"),
+  const load = useCallback(async (force = false) => {
+    const [cal, prefsPayload] = await Promise.all([
+      cachedJson<CalData>("/api/calendar?days=21", { softTtlMs: 20_000, force }),
+      cachedJson<{ prefs: Record<string, unknown> }>("/api/prefs", {
+        softTtlMs: 60_000,
+        force,
+      }),
     ]);
-    if (calRes.ok) setData(await calRes.json());
-    if (prefsRes.ok) {
-      const { prefs } = await prefsRes.json();
-      const daysPref = Array.isArray(prefs.workDays) ? prefs.workDays : [1, 2, 3, 4, 5];
-      setWorkDays(daysPref.length ? daysPref : [1, 2, 3, 4, 5]);
-      setPlanningDays(prefs.planningDays ?? 14);
-      setStartMinutes(prefs.startMinutes ?? 540);
-      setEndMinutes(prefs.endMinutes ?? 1020);
-      setBreakStart(prefs.breakStartMinutes ?? null);
-      setBreakEnd(prefs.breakEndMinutes ?? null);
-    }
+    setData(cal);
+    const prefs = prefsPayload.prefs ?? {};
+    const daysPref = Array.isArray(prefs.workDays) ? (prefs.workDays as number[]) : [1, 2, 3, 4, 5];
+    setWorkDays(daysPref.length ? daysPref : [1, 2, 3, 4, 5]);
+    setPlanningDays((prefs.planningDays as number | undefined) ?? 14);
+    setStartMinutes((prefs.startMinutes as number | undefined) ?? 540);
+    setEndMinutes((prefs.endMinutes as number | undefined) ?? 1020);
+    setBreakStart((prefs.breakStartMinutes as number | null | undefined) ?? null);
+    setBreakEnd((prefs.breakEndMinutes as number | null | undefined) ?? null);
   }, []);
 
   useEffect(() => {
@@ -148,7 +150,9 @@ export default function CalendarPage() {
   async function reschedule() {
     setScheduling(true);
     await fetch("/api/schedule/run", { method: "POST" });
-    await load();
+    invalidateClientCache("/api/calendar");
+    invalidateClientCache("/api/today");
+    await load(true);
     setScheduling(false);
   }
 

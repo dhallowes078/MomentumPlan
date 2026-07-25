@@ -23,6 +23,7 @@ import { DueDatePicker } from "@/components/DueDatePicker";
 import { AssigneeSelect } from "@/components/AssigneeSelect";
 import { FileButton } from "@/components/FileButton";
 import { EmojiPicker } from "@/components/EmojiPicker";
+import { cachedJson, invalidateClientCache } from "@/lib/client-fetch";
 
 type Member = {
   id: string;
@@ -270,14 +271,28 @@ export default function TaskDetailPage() {
     setBaselineMentions(mentions);
   }, []);
 
-  const load = useCallback(async () => {
-    const res = await fetch(`/api/tasks/${params.id}`);
-    if (!res.ok) return;
-    const data = await res.json();
-    applyLoaded(data.task as TaskDetail);
-    const ws = await fetch(`/api/workspaces/${data.task.workspaceId}`).then((r) => r.json());
-    setMembers(ws.workspace.members.map((m: { user: Member }) => m.user));
-    setBuckets(ws.workspace.buckets ?? []);
+  const load = useCallback(async (force = false) => {
+    const data = await cachedJson<{
+      task: TaskDetail;
+      workspace?: {
+        buckets: { id: string; name: string; color: string }[];
+        members: Member[];
+      };
+    }>(`/api/tasks/${params.id}`, { softTtlMs: 8_000, force });
+    applyLoaded(data.task);
+    if (data.workspace) {
+      setMembers(data.workspace.members);
+      setBuckets(data.workspace.buckets ?? []);
+    } else {
+      const ws = await cachedJson<{
+        workspace: {
+          members: { user: Member }[];
+          buckets: { id: string; name: string; color: string }[];
+        };
+      }>(`/api/workspaces/${data.task.workspaceId}`, { softTtlMs: 60_000, force });
+      setMembers(ws.workspace.members.map((m) => m.user));
+      setBuckets(ws.workspace.buckets ?? []);
+    }
   }, [params.id, applyLoaded]);
 
   useEffect(() => {
@@ -317,7 +332,12 @@ export default function TaskDetailPage() {
         });
       }
 
-      await load();
+      invalidateClientCache(`/api/tasks/${params.id}`);
+      invalidateClientCache("/api/tasks");
+      invalidateClientCache("/api/today");
+      invalidateClientCache("/api/status");
+      invalidateClientCache("/api/calendar");
+      await load(true);
     } finally {
       setSaving(false);
     }
@@ -330,6 +350,10 @@ export default function TaskDetailPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: "DONE" }),
     });
+    invalidateClientCache("/api/tasks");
+    invalidateClientCache("/api/today");
+    invalidateClientCache("/api/status");
+    invalidateClientCache("/api/calendar");
     window.setTimeout(() => {
       router.push("/tasks");
     }, 850);
@@ -341,7 +365,10 @@ export default function TaskDetailPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: "TODO" }),
     });
-    await load();
+    invalidateClientCache("/api/tasks");
+    invalidateClientCache("/api/today");
+    invalidateClientCache("/api/status");
+    await load(true);
   }
 
   async function toggleChunk(blockId: string, completed: boolean) {
@@ -350,7 +377,9 @@ export default function TaskDetailPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ completed }),
     });
-    await load();
+    invalidateClientCache(`/api/tasks/${params.id}`);
+    invalidateClientCache("/api/today");
+    await load(true);
   }
 
   async function addComment(e: React.FormEvent) {
