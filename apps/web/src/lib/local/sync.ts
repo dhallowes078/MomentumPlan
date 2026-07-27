@@ -250,6 +250,12 @@ export async function pullFromServer() {
       },
       false
     );
+    try {
+      const { applyTheme } = await import("@/lib/theme");
+      applyTheme(String(p.themeColor ?? "#1f4d3a"), Boolean(p.darkMode));
+    } catch {
+      // theme optional during sync
+    }
   }
 
   await setMeta("lastSyncAt", new Date().toISOString());
@@ -260,6 +266,13 @@ export async function pullFromServer() {
     await rescheduleTaskNotifications();
   } catch {
     // notifications optional on web
+  }
+
+  try {
+    const { syncHomeWidget } = await import("./widget-sync");
+    await syncHomeWidget();
+  } catch {
+    // android widget optional
   }
 }
 
@@ -386,15 +399,12 @@ export async function saveAndSync() {
 export async function bootLocalSync() {
   try {
     emit();
-    const db = (await import("./db")).getLocalDb();
     await repo.ensureOfflineWorkspace();
-    const hasData = (await db.tasks.count()) > 0 || (await db.workspaces.count()) > 0;
     if (canSyncRemote()) {
-      if (!hasData) {
-        await pullFromServer();
-      } else {
-        void pullFromServer().then(() => flushOutbox());
-      }
+      // Push local prefs/theme (and other outbox ops) before pull so a
+      // stale server snapshot does not wipe appearance on boot.
+      await flushOutbox();
+      await pullFromServer();
       await flushOutbox();
     } else {
       setStatus("idle");

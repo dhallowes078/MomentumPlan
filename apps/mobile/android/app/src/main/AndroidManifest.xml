@@ -23,7 +23,27 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="app.momentum.plan" />
+            </intent-filter>
+
         </activity>
+
+        <receiver
+            android:name=".MomentumWidgetProvider"
+            android:exported="true"
+            android:label="@string/widget_title">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="app.momentum.plan.widget.COMPLETE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/momentum_widget_info" />
+        </receiver>
 
         <provider
             android:name="androidx.core.content.FileProvider"

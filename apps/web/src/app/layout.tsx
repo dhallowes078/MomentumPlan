@@ -37,7 +37,14 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var t=JSON.parse(localStorage.getItem("momentum_theme")||"null");if(!t)return;var r=document.documentElement;r.dataset.theme=t.darkMode?"dark":"light";if(t.themeColor){r.style.setProperty("--brand",t.themeColor)}}catch(e){}})();`,
+          }}
+        />
+      </head>
       <body className={`${sans.variable} ${display.variable} antialiased`}>
         <Providers>{children}</Providers>
       </body>

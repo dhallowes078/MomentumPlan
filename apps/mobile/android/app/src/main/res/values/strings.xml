@@ -4,4 +4,9 @@
     <string name="title_activity_main">Momentum</string>
     <string name="package_name">app.momentum.plan</string>
     <string name="custom_url_scheme">app.momentum.plan</string>
+    <string name="widget_title">Momentum</string>
+    <string name="widget_description">Current and next scheduled tasks with a complete button</string>
+    <string name="widget_now">Now</string>
+    <string name="widget_next">Next</string>
+    <string name="widget_complete">Mark complete</string>
 </resources>

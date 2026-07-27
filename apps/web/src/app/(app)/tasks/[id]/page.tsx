@@ -245,6 +245,8 @@ export default function TaskDetailPage() {
   const [saving, setSaving] = useState(false);
   const [completing, setCompleting] = useState(false);
 
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   const sizeMinutes = useMemo(
     () => ({
       tiny: theme.tinyMinutes,
@@ -271,33 +273,93 @@ export default function TaskDetailPage() {
     const mentions = (loaded.mentions ?? []).map((m) => m.userId);
     setMentionIds(mentions);
     setBaselineMentions(mentions);
+    setLoadError(null);
   }, []);
 
-  const load = useCallback(async (force = false) => {
-    const data = await cachedJson<{
-      task: TaskDetail;
-      workspace?: {
-        buckets: { id: string; name: string; color: string }[];
-        members: Member[];
-      };
-    }>(`/api/tasks/${params.id}`, { softTtlMs: 8_000, force });
-    applyLoaded(data.task);
-    if (data.workspace) {
-      setMembers(data.workspace.members);
-      setBuckets(data.workspace.buckets ?? []);
-    } else {
-      const ws = await cachedJson<{
-        workspace: {
-          members: { user: Member }[];
-          buckets: { id: string; name: string; color: string }[];
-        };
-      }>(`/api/workspaces/${data.task.workspaceId}`, { softTtlMs: 60_000, force });
-      setMembers(ws.workspace.members.map((m) => m.user));
-      setBuckets(ws.workspace.buckets ?? []);
+  const loadFromLocal = useCallback(async (id: string) => {
+    const local = await localRepo.getTask(id);
+    if (!local) return false;
+    const ws = await localRepo.getWorkspace(local.workspaceId);
+    const blocks = (await localRepo.listScheduleBlocks()).filter((b) => b.taskId === id);
+    applyLoaded({
+      id: local.id,
+      workspaceId: local.workspaceId,
+      title: local.title,
+      notes: local.notes,
+      headerImageKey: local.headerImageKey,
+      headerImageUrl: local.headerImageUrl ?? null,
+      emoji: local.emoji,
+      priority: local.priority,
+      estimateMinutes: local.estimateMinutes,
+      status: local.status,
+      dueAt: local.dueAt,
+      scheduledStart: local.scheduledStart,
+      scheduledEnd: local.scheduledEnd,
+      atRisk: local.atRisk,
+      locked: local.locked,
+      allowSplit: local.allowSplit,
+      assigneeId: local.assigneeId,
+      bucketId: local.bucketId,
+      bucket: local.bucket ?? null,
+      isRecurring: local.isRecurring,
+      links: [],
+      attachments: [],
+      checklistItems: [],
+      mentions: [],
+      scheduleBlocks: blocks.map((b) => ({
+        id: b.id,
+        start: b.start,
+        end: b.end,
+        completed: b.completed,
+      })),
+      comments: [],
+      events: [],
+    });
+    if (ws) {
+      setMembers(ws.members);
+      setBuckets(ws.buckets ?? []);
     }
-  }, [params.id, applyLoaded]);
+    return true;
+  }, [applyLoaded]);
+
+  const load = useCallback(async (force = false) => {
+    const id = String(params.id ?? "");
+    if (!id) {
+      setLoadError("Missing task id");
+      return;
+    }
+    try {
+      const data = await cachedJson<{
+        task: TaskDetail;
+        workspace?: {
+          buckets: { id: string; name: string; color: string }[];
+          members: Member[];
+        };
+      }>(`/api/tasks/${id}`, { softTtlMs: 8_000, force });
+      applyLoaded(data.task);
+      if (data.workspace) {
+        setMembers(data.workspace.members);
+        setBuckets(data.workspace.buckets ?? []);
+      } else {
+        const ws = await cachedJson<{
+          workspace: {
+            members: { user: Member }[];
+            buckets: { id: string; name: string; color: string }[];
+          };
+        }>(`/api/workspaces/${data.task.workspaceId}`, { softTtlMs: 60_000, force });
+        setMembers(ws.workspace.members.map((m) => m.user));
+        setBuckets(ws.workspace.buckets ?? []);
+      }
+    } catch {
+      const ok = await loadFromLocal(id);
+      if (!ok) setLoadError("Couldn’t load this task");
+    }
+  }, [params.id, applyLoaded, loadFromLocal]);
 
   useEffect(() => {
+    setTask(null);
+    setDraft(null);
+    setLoadError(null);
     void load();
   }, [load]);
 
@@ -462,7 +524,11 @@ export default function TaskDetailPage() {
   }
 
   if (!task || !draft) {
-    return <p style={{ color: "var(--ink-muted)" }}>Loading task…</p>;
+    return (
+      <p style={{ color: "var(--ink-muted)" }}>
+        {loadError ?? "Loading task…"}
+      </p>
+    );
   }
 
   const headerBackground = draft.headerImageUrl

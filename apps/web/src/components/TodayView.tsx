@@ -23,6 +23,12 @@ export function TodayView() {
     if (dragIndex == null) setBlocks(liveBlocks);
   }, [liveBlocks, dragIndex]);
 
+  useEffect(() => {
+    void import("@/lib/local/widget-sync")
+      .then((m) => m.syncHomeWidget(liveBlocks))
+      .catch(() => undefined);
+  }, [liveBlocks]);
+
   async function reschedule() {
     setScheduling(true);
     try {
@@ -46,7 +52,9 @@ export function TodayView() {
     );
     window.setTimeout(async () => {
       await flushOutbox();
+      const { pullFromServer } = await import("@/lib/local/sync");
       await pullFromServer();
+      void import("@/lib/local/widget-sync").then((m) => m.syncHomeWidget());
       setCompletingId(null);
     }, 400);
   }

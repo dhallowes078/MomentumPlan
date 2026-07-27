@@ -28,7 +28,7 @@ type Status = {
 
 type Filter = "onTime" | "pushed" | "overdue";
 
-export function TrafficLights() {
+export function TrafficLights({ compact = false }: { compact?: boolean }) {
   const [status, setStatus] = useState<Status>({
     onTime: 0,
     pushed: 0,
@@ -85,6 +85,7 @@ export function TrafficLights() {
   return (
     <>
       <div
+        className="traffic-lights"
         style={{
           display: "flex",
           alignItems: "center",
@@ -104,7 +105,7 @@ export function TrafficLights() {
               display: "inline-flex",
               alignItems: "center",
               gap: "0.35rem",
-              padding: "0.2rem 0.55rem",
+              padding: compact ? "0.2rem 0.45rem" : "0.2rem 0.55rem",
               borderRadius: 999,
               border: "1px solid var(--line)",
               background: "color-mix(in srgb, var(--bg-elevated) 80%, transparent)",
@@ -123,7 +124,9 @@ export function TrafficLights() {
                 boxShadow: `0 0 0 3px color-mix(in srgb, ${light.color} 22%, transparent)`,
               }}
             />
-            <span style={{ color: "var(--ink-muted)" }}>{light.label}</span>
+            <span className="traffic-light-label" style={{ color: "var(--ink-muted)" }}>
+              {light.label}
+            </span>
             <span>{light.count}</span>
           </button>
         ))}

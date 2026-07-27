@@ -68,46 +68,25 @@ function AppShellInner({
 
   return (
     <div className="app-shell">
-      <header
-        className="card"
-        style={{
-          margin: "0.75rem",
-          padding: "0.85rem 1.1rem",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: "0.75rem",
-          gridColumn: "1 / -1",
-          flexWrap: "wrap",
-        }}
-      >
-        <div>
-          <div
-            style={{
-              fontFamily: "var(--font-display), serif",
-              fontSize: "1.35rem",
-              fontWeight: 650,
-              letterSpacing: "-0.02em",
-            }}
-          >
-            Momentum
-          </div>
-          <div style={{ color: "var(--ink-muted)", fontSize: "0.85rem" }}>
+      <header className="card app-header">
+        <div className="app-header-brand">
+          <div className="app-header-title">Momentum</div>
+          <div className="app-header-subtitle">
             {userName ? `Plan for ${userName}` : "Auto-plan your day"}
           </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+        <div className="app-header-meta">
           <SyncBadge />
-          <TrafficLights />
+          <TrafficLights compact />
         </div>
         <button
-          className="btn"
+          className="btn app-header-cta"
           onClick={() => {
             setNewTaskMode("full");
             setNewTaskOpen(true);
           }}
         >
-          <Plus size={16} /> New Task
+          <Plus size={16} /> <span className="app-header-cta-label">New Task</span>
         </button>
       </header>
 

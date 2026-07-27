@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
-import { applyTheme } from "@/lib/theme";
+import { applyTheme, readStoredTheme } from "@/lib/theme";
 
 type ThemeState = {
   themeColor: string;
@@ -25,11 +25,33 @@ const defaults = {
   bigMinutes: 120,
 };
 
+function initialThemeState() {
+  const stored = readStoredTheme();
+  return {
+    ...defaults,
+    ...(stored ?? {}),
+  };
+}
+
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [state, setState] = useState(defaults);
+  const [state, setState] = useState(initialThemeState);
 
   const refresh = useCallback(async () => {
     try {
+      const local = await import("@/lib/local/repo").then((m) => m.getPrefs()).catch(() => null);
+      if (local) {
+        const fromLocal = {
+          themeColor: local.themeColor ?? defaults.themeColor,
+          darkMode: Boolean(local.darkMode),
+          tinyMinutes: local.tinyMinutes ?? defaults.tinyMinutes,
+          smallMinutes: local.smallMinutes ?? defaults.smallMinutes,
+          mediumMinutes: local.mediumMinutes ?? defaults.mediumMinutes,
+          bigMinutes: local.bigMinutes ?? defaults.bigMinutes,
+        };
+        setState(fromLocal);
+        applyTheme(fromLocal.themeColor, fromLocal.darkMode);
+      }
+
       const res = await fetch("/api/prefs");
       if (!res.ok) return;
       const { prefs } = await res.json();
@@ -44,11 +66,15 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       setState(next);
       applyTheme(next.themeColor, next.darkMode);
     } catch {
-      applyTheme(defaults.themeColor, defaults.darkMode);
+      const stored = readStoredTheme();
+      if (stored) applyTheme(stored.themeColor, stored.darkMode);
+      else applyTheme(defaults.themeColor, defaults.darkMode);
     }
   }, []);
 
   useEffect(() => {
+    const stored = readStoredTheme();
+    if (stored) applyTheme(stored.themeColor, stored.darkMode);
     void refresh();
   }, [refresh]);
 

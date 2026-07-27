@@ -322,23 +322,25 @@ export function NewTaskModal({
         zIndex: 200,
         background: "rgba(10, 16, 12, 0.45)",
         display: "flex",
-        alignItems: "flex-start",
+        alignItems: "center",
         justifyContent: "center",
-        overflowY: "auto",
-        padding: "max(1rem, 4vh) 1rem",
+        overflow: "hidden",
+        padding: "max(0.75rem, env(safe-area-inset-top)) 0.75rem max(0.75rem, env(safe-area-inset-bottom))",
       }}
       onClick={onClose}
     >
       <form
-        className="card rise"
+        className="card rise new-task-modal"
         onClick={(e) => e.stopPropagation()}
         onSubmit={create}
         style={{
           width: "min(560px, 100%)",
           margin: "0 auto",
           padding: 0,
-          display: "grid",
-          gap: 0,
+          display: "flex",
+          flexDirection: "column",
+          maxHeight: "min(92dvh, 920px)",
+          overflow: "hidden",
         }}
       >
         {mode === "full" && (
@@ -387,7 +389,18 @@ export function NewTaskModal({
           </div>
         )}
 
-        <div style={{ padding: "1.15rem", display: "grid", gap: "0.85rem" }}>
+        <div
+          className="new-task-modal-body"
+          style={{
+            padding: "1.15rem",
+            display: "grid",
+            gap: "0.85rem",
+            overflowY: "auto",
+            flex: 1,
+            minHeight: 0,
+            paddingBottom: "1.25rem",
+          }}
+        >
           <div style={{ display: "flex", justifyContent: "space-between", gap: "0.75rem", alignItems: "center" }}>
             <h2 style={{ margin: 0, fontSize: "1.15rem" }}>New task</h2>
             <div style={{ display: "flex", gap: "0.35rem", alignItems: "center" }}>
@@ -801,8 +814,19 @@ export function NewTaskModal({
               </select>
             </label>
           )}
+        </div>
 
-          <button className="btn" type="submit" disabled={saving}>
+        <div
+          className="new-task-modal-footer"
+          style={{
+            padding: "0.85rem 1.15rem calc(0.85rem + env(safe-area-inset-bottom, 0px))",
+            borderTop: "1px solid var(--line)",
+            background: "color-mix(in srgb, var(--card-bg) 92%, transparent)",
+            backdropFilter: "blur(10px)",
+            flexShrink: 0,
+          }}
+        >
+          <button className="btn" type="submit" disabled={saving} style={{ width: "100%" }}>
             {saving ? "Creating…" : "Create & schedule"}
           </button>
         </div>

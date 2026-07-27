@@ -47,6 +47,9 @@ export function App() {
       .catch(() => undefined);
     void bootLocalSync().finally(() => setReady(true));
     void initNotifications().catch(() => undefined);
+    void import("@/lib/local/widget-sync")
+      .then((m) => m.syncHomeWidget())
+      .catch(() => undefined);
     void import("@capacitor/status-bar")
       .then(async ({ StatusBar, Style }) => {
         // Best-effort on older Android; Android 15+ relies on CSS safe-area insets.
