@@ -36,4 +36,12 @@ const result = spawnSync(path.join(androidDir, "gradlew.bat"), ["assembleDebug"]
   shell: true,
 });
 
-process.exit(result.status ?? 1);
+if ((result.status ?? 1) !== 0) {
+  process.exit(result.status ?? 1);
+}
+
+const builtApk = path.join(androidDir, "app", "build", "outputs", "apk", "debug", "app-debug.apk");
+const destApk = path.join(__dirname, "..", "..", "..", "Momentum-debug.apk");
+fs.copyFileSync(builtApk, destApk);
+console.log(`Copied APK to ${destApk}`);
+process.exit(0);
