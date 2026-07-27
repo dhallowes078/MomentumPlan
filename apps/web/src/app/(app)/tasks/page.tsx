@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { Plus, RotateCcw } from "lucide-react";
+import { GripVertical, Plus, RotateCcw } from "lucide-react";
 import { formatMinutes, priorityColor } from "@/lib/format";
 import { NewTaskModal } from "@/components/NewTaskModal";
 import { useLocalTasks, useLocalWorkspaces } from "@/lib/local/hooks";
 import * as repo from "@/lib/local/repo";
+import type { LocalTask } from "@/lib/local/db";
 import { flushOutbox, pullFromServer } from "@/lib/local/sync";
 
 export default function TasksPage() {
@@ -19,6 +20,11 @@ export default function TasksPage() {
   const [tab, setTab] = useState<"open" | "completed">("open");
   const [createOpen, setCreateOpen] = useState(false);
   const [createMode, setCreateMode] = useState<"simple" | "full">("simple");
+  const [ordered, setOrdered] = useState<LocalTask[]>([]);
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [overIndex, setOverIndex] = useState<number | null>(null);
+  const dragOriginIndex = useRef<number | null>(null);
+  const listAtDragStart = useRef<LocalTask[]>([]);
 
   useEffect(() => {
     if (!workspaceId && workspaces[0]?.id) setWorkspaceId(workspaces[0].id);
@@ -30,23 +36,126 @@ export default function TasksPage() {
   );
   const members = current?.members ?? [];
 
+  const visible = useMemo(() => {
+    return tasks
+      .filter((t) => {
+        if (tab === "completed") {
+          if (t.status !== "DONE") return false;
+        } else if (t.status === "DONE" || t.status === "CANCELLED") {
+          return false;
+        }
+        if (bucketFilter !== "all" && t.bucketId !== bucketFilter) return false;
+        if (assigneeFilter !== "all" && t.assigneeId !== assigneeFilter) return false;
+        if (priorityFilter !== "all" && t.priority !== Number(priorityFilter)) return false;
+        return true;
+      })
+      .sort((a, b) => {
+        if (tab === "completed") {
+          const ad = a.completedAt ? new Date(a.completedAt).getTime() : 0;
+          const bd = b.completedAt ? new Date(b.completedAt).getTime() : 0;
+          return bd - ad;
+        }
+        if (a.position !== b.position) return a.position - b.position;
+        if (a.priority !== b.priority) return b.priority - a.priority;
+        return a.title.localeCompare(b.title);
+      });
+  }, [tasks, tab, bucketFilter, assigneeFilter, priorityFilter]);
+
+  useEffect(() => {
+    if (dragIndex == null) setOrdered(visible);
+  }, [visible, dragIndex]);
+
   async function reopen(taskId: string) {
     await repo.patchLocalTask(taskId, { status: "TODO", completedAt: null }, { status: "TODO" });
     await flushOutbox();
     await pullFromServer();
   }
 
-  const visible = tasks.filter((t) => {
-    if (tab === "completed") {
-      if (t.status !== "DONE") return false;
-    } else if (t.status === "DONE" || t.status === "CANCELLED") {
-      return false;
+  function onDragStart(index: number) {
+    dragOriginIndex.current = index;
+    listAtDragStart.current = ordered;
+    setDragIndex(index);
+    setOverIndex(index);
+  }
+
+  function onDragOver(index: number) {
+    if (dragIndex == null || dragIndex === index) return;
+    setOverIndex(index);
+    setOrdered((prev) => {
+      const next = [...prev];
+      const [moved] = next.splice(dragIndex, 1);
+      next.splice(index, 0, moved);
+      setDragIndex(index);
+      return next;
+    });
+  }
+
+  function crossedDifferentPriority(from: number, to: number, start: LocalTask[]) {
+    if (from === to) return false;
+    const moved = start[from];
+    if (!moved) return false;
+    const lo = Math.min(from, to);
+    const hi = Math.max(from, to);
+    for (let i = lo; i <= hi; i++) {
+      if (i === from) continue;
+      if (start[i]?.priority !== moved.priority) return true;
     }
-    if (bucketFilter !== "all" && t.bucketId !== bucketFilter) return false;
-    if (assigneeFilter !== "all" && t.assigneeId !== assigneeFilter) return false;
-    if (priorityFilter !== "all" && t.priority !== Number(priorityFilter)) return false;
-    return true;
-  });
+    return false;
+  }
+
+  async function onDrop() {
+    if (dragOriginIndex.current == null && dragIndex == null) return;
+    const next = ordered;
+    const from = dragOriginIndex.current;
+    const to = dragIndex;
+    const start = listAtDragStart.current;
+    dragOriginIndex.current = null;
+    setDragIndex(null);
+    setOverIndex(null);
+
+    if (from == null || to == null || from === to) {
+      setOrdered(visible);
+      return;
+    }
+
+    const orderChanged = start.map((t) => t.id).join("|") !== next.map((t) => t.id).join("|");
+    if (!orderChanged) {
+      setOrdered(visible);
+      return;
+    }
+
+    const prioritiesDiffer = crossedDifferentPriority(from, to, start);
+    const message = prioritiesDiffer
+      ? "Save this task order and update priority numbers to match?"
+      : "Save this new task order?";
+
+    if (!window.confirm(message)) {
+      setOrdered(visible);
+      return;
+    }
+
+    const applyPriorities = prioritiesDiffer;
+    const updates = next.map((t, i) => {
+      const priority = applyPriorities
+        ? Math.max(1, Math.min(5, 5 - Math.floor((i / Math.max(next.length - 1, 1)) * 4)))
+        : t.priority;
+      return { id: t.id, priority, position: i };
+    });
+
+    for (const u of updates) {
+      await repo.patchLocalTask(u.id, { priority: u.priority, position: u.position });
+    }
+    await fetch("/api/tasks/reorder", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ updates }),
+    });
+    await flushOutbox();
+    await pullFromServer();
+  }
+
+  const canReorder = tab === "open";
+  const list = canReorder ? ordered : visible;
 
   return (
     <div className="page-wrap rise">
@@ -63,6 +172,7 @@ export default function TasksPage() {
           </h1>
           <p style={{ margin: "0.35rem 0 0", color: "var(--ink-muted)" }}>
             Instant local list — syncs when you save.
+            {canReorder ? " Drag the handle to reorder." : ""}
           </p>
         </div>
         <button
@@ -156,22 +266,59 @@ export default function TasksPage() {
       </div>
 
       <div style={{ display: "grid", gap: "0.55rem" }}>
-        {visible.length === 0 ? (
+        {list.length === 0 ? (
           <p style={{ color: "var(--ink-muted)" }}>No tasks match these filters.</p>
         ) : (
-          visible.map((t) => (
+          list.map((t, i) => (
             <div
               key={t.id}
-              className="card"
+              className={`card ${
+                dragIndex === i ? "drag-ghost" : overIndex === i && dragIndex != null ? "dragging-item" : ""
+              }`}
+              onDragOver={
+                canReorder
+                  ? (e) => {
+                      e.preventDefault();
+                      onDragOver(i);
+                    }
+                  : undefined
+              }
               style={{
                 padding: "0.85rem 1rem",
                 display: "grid",
-                gridTemplateColumns: t.headerImageUrl ? "72px 1fr auto" : "1fr auto",
+                gridTemplateColumns: canReorder
+                  ? t.headerImageUrl
+                    ? "28px 72px 1fr auto"
+                    : "28px 1fr auto"
+                  : t.headerImageUrl
+                    ? "72px 1fr auto"
+                    : "1fr auto",
                 gap: "0.75rem",
                 alignItems: "center",
                 borderLeft: t.bucket ? `4px solid ${t.bucket.color}` : undefined,
+                transition: "transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease",
               }}
             >
+              {canReorder ? (
+                <span
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.effectAllowed = "move";
+                    onDragStart(i);
+                  }}
+                  onDragEnd={() => void onDrop()}
+                  title="Drag to reorder"
+                  style={{
+                    display: "grid",
+                    placeItems: "center",
+                    cursor: "grab",
+                    touchAction: "none",
+                    padding: "0.25rem",
+                  }}
+                >
+                  <GripVertical size={16} color="var(--ink-muted)" />
+                </span>
+              ) : null}
               {t.headerImageUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img

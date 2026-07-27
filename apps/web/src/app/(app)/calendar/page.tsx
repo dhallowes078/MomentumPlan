@@ -12,6 +12,11 @@ import {
 } from "@/lib/local/hooks";
 import * as repo from "@/lib/local/repo";
 import { canSyncRemote, flushOutbox, pullFromServer } from "@/lib/local/sync";
+import {
+  type CalendarViewMode,
+  readCalendarView,
+  writeCalendarView,
+} from "@/lib/theme";
 
 type TimedItem = {
   id: string;
@@ -60,7 +65,7 @@ export default function CalendarPage() {
   const meetings = useLocalMeetings();
   const prefs = useLocalPrefs();
   const [scheduling, setScheduling] = useState(false);
-  const [view, setView] = useState<"horizontal" | "vertical">("horizontal");
+  const [view, setView] = useState<CalendarViewMode>("horizontal");
   const [viewportH, setViewportH] = useState(800);
   const [nowMinutes, setNowMinutes] = useState(() => {
     const n = new Date();
@@ -108,6 +113,10 @@ export default function CalendarPage() {
   }, [today, workDays, planningDays]);
 
   useEffect(() => {
+    setView(readCalendarView());
+  }, []);
+
+  useEffect(() => {
     const tick = () => {
       const n = new Date();
       setNowMinutes(n.getHours() * 60 + n.getMinutes());
@@ -116,6 +125,11 @@ export default function CalendarPage() {
     const id = window.setInterval(tick, 30_000);
     return () => window.clearInterval(id);
   }, []);
+
+  function chooseView(next: CalendarViewMode) {
+    setView(next);
+    writeCalendarView(next);
+  }
 
   useEffect(() => {
     const update = () => setViewportH(window.innerHeight);
@@ -282,7 +296,7 @@ export default function CalendarPage() {
                   ? { background: "color-mix(in srgb, var(--brand) 14%, transparent)" }
                   : undefined
               }
-              onClick={() => setView("horizontal")}
+              onClick={() => chooseView("horizontal")}
             >
               <GalleryHorizontal size={16} />
               <span className="cal-toolbar-label">Horizontal</span>
@@ -296,7 +310,7 @@ export default function CalendarPage() {
                   ? { background: "color-mix(in srgb, var(--brand) 14%, transparent)" }
                   : undefined
               }
-              onClick={() => setView("vertical")}
+              onClick={() => chooseView("vertical")}
             >
               <GalleryVertical size={16} />
               <span className="cal-toolbar-label">Vertical</span>

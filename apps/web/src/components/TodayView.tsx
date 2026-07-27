@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Check, GripVertical, RefreshCw, TriangleAlert } from "lucide-react";
+import { Check, RefreshCw, TriangleAlert } from "lucide-react";
 import { format } from "date-fns";
 import { formatMinutes, formatTime, priorityColor } from "@/lib/format";
 import { useLocalToday } from "@/lib/local/hooks";
@@ -11,17 +11,8 @@ import { flushOutbox } from "@/lib/local/sync";
 
 export function TodayView() {
   const { blocks: liveBlocks, backlog, atRisk } = useLocalToday();
-  const [blocks, setBlocks] = useState(liveBlocks);
   const [scheduling, setScheduling] = useState(false);
   const [completingId, setCompletingId] = useState<string | null>(null);
-  const [dragIndex, setDragIndex] = useState<number | null>(null);
-  const [overIndex, setOverIndex] = useState<number | null>(null);
-  const dragOriginIndex = useRef<number | null>(null);
-  const blocksAtDragStart = useRef(liveBlocks);
-
-  useEffect(() => {
-    if (dragIndex == null) setBlocks(liveBlocks);
-  }, [liveBlocks, dragIndex]);
 
   useEffect(() => {
     void import("@/lib/local/widget-sync")
@@ -57,89 +48,6 @@ export function TodayView() {
       void import("@/lib/local/widget-sync").then((m) => m.syncHomeWidget());
       setCompletingId(null);
     }, 400);
-  }
-
-  function onDragStart(index: number) {
-    dragOriginIndex.current = index;
-    blocksAtDragStart.current = blocks;
-    setDragIndex(index);
-    setOverIndex(index);
-  }
-
-  function onDragOver(index: number) {
-    if (dragIndex == null || dragIndex === index) return;
-    setOverIndex(index);
-    setBlocks((prev) => {
-      const next = [...prev];
-      const [moved] = next.splice(dragIndex, 1);
-      next.splice(index, 0, moved);
-      setDragIndex(index);
-      return next;
-    });
-  }
-
-  function crossedDifferentPriority(from: number, to: number, start: typeof blocks) {
-    if (from === to) return false;
-    const moved = start[from];
-    if (!moved) return false;
-    const lo = Math.min(from, to);
-    const hi = Math.max(from, to);
-    for (let i = lo; i <= hi; i++) {
-      if (i === from) continue;
-      if (start[i]?.task?.priority !== moved.task?.priority) return true;
-    }
-    return false;
-  }
-
-  async function onDrop() {
-    if (dragOriginIndex.current == null && dragIndex == null) return;
-    const next = blocks;
-    const from = dragOriginIndex.current;
-    const to = dragIndex;
-    const start = blocksAtDragStart.current;
-    dragOriginIndex.current = null;
-    setDragIndex(null);
-    setOverIndex(null);
-
-    if (from == null || to == null || from === to) {
-      setBlocks(liveBlocks);
-      return;
-    }
-
-    const orderChanged =
-      start.map((b) => b.id).join("|") !== next.map((b) => b.id).join("|");
-    if (!orderChanged) {
-      setBlocks(liveBlocks);
-      return;
-    }
-
-    const prioritiesDiffer = crossedDifferentPriority(from, to, start);
-    const message = prioritiesDiffer
-      ? "Save this agenda order and update priority numbers to match?"
-      : "Save this new agenda order?";
-
-    if (!window.confirm(message)) {
-      setBlocks(liveBlocks);
-      return;
-    }
-
-    const applyPriorities = prioritiesDiffer;
-    const updates = next.map((b, i) => {
-      const priority = applyPriorities
-        ? Math.max(1, Math.min(5, 5 - Math.floor((i / Math.max(next.length - 1, 1)) * 4)))
-        : (b.task?.priority ?? 3);
-      return { id: b.task!.id, priority, position: i };
-    });
-
-    for (const u of updates) {
-      await repo.patchLocalTask(u.id, { priority: u.priority, position: u.position });
-    }
-    await fetch("/api/tasks/reorder", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ updates }),
-    });
-    await pullFromServer();
   }
 
   return (
@@ -212,25 +120,19 @@ export function TodayView() {
 
       <section className="card" style={{ padding: "1rem" }}>
         <h2 style={{ margin: "0 0 0.85rem", fontSize: "1rem" }}>Agenda</h2>
-        {blocks.length === 0 ? (
+        {liveBlocks.length === 0 ? (
           <p style={{ color: "var(--ink-muted)", margin: 0 }}>
             Nothing scheduled yet. Add tasks with estimates, then hit Reschedule.
           </p>
         ) : (
           <div style={{ display: "grid", gap: "0.65rem" }}>
-            {blocks.map((b, i) => (
+            {liveBlocks.map((b, i) => (
               <div
                 key={b.id}
-                className={`${completingId === b.task?.id ? "completing" : "rise"} ${
-                  dragIndex === i ? "drag-ghost" : overIndex === i && dragIndex != null ? "dragging-item" : ""
-                }`}
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  onDragOver(i);
-                }}
+                className={completingId === b.task?.id ? "completing" : "rise"}
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "28px 72px 1fr auto",
+                  gridTemplateColumns: "72px 1fr auto",
                   gap: "0.75rem",
                   alignItems: "center",
                   padding: "0.75rem",
@@ -240,27 +142,8 @@ export function TodayView() {
                     ? `4px solid ${b.task.bucket.color}`
                     : "4px solid transparent",
                   animationDelay: `${i * 40}ms`,
-                  transition: "transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease",
                 }}
               >
-                <span
-                  draggable
-                  onDragStart={(e) => {
-                    e.dataTransfer.effectAllowed = "move";
-                    onDragStart(i);
-                  }}
-                  onDragEnd={() => void onDrop()}
-                  title="Drag to reorder"
-                  style={{
-                    display: "grid",
-                    placeItems: "center",
-                    cursor: "grab",
-                    touchAction: "none",
-                    padding: "0.25rem",
-                  }}
-                >
-                  <GripVertical size={16} color="var(--ink-muted)" />
-                </span>
                 <div style={{ fontSize: "0.8rem", color: "var(--ink-muted)", lineHeight: 1.35 }}>
                   <div>{formatTime(b.start)}</div>
                   <div>{formatTime(b.end)}</div>
