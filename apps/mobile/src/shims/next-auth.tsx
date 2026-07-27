@@ -1,35 +1,14 @@
-import { createContext, useContext, type ReactNode } from "react";
-import { getDeviceToken } from "@/lib/sync-api";
+import { signOutLocal, setDeviceToken } from "./auth-store";
 
-type Session = {
-  user?: { id?: string; name?: string | null; email?: string | null };
-} | null;
+export { SessionProvider, useSession, signIn } from "./auth-store";
 
-const SessionCtx = createContext<{ data: Session; status: string }>({
-  data: null,
-  status: "unauthenticated",
-});
-
-export function SessionProvider({ children }: { children: ReactNode }) {
-  const token = typeof window !== "undefined" ? getDeviceToken() : null;
-  const value = {
-    data: token ? { user: { id: "device", name: "Linked" } } : null,
-    status: token ? "authenticated" : "unauthenticated",
-  };
-  return <SessionCtx.Provider value={value}>{children}</SessionCtx.Provider>;
-}
-
-export function useSession() {
-  return useContext(SessionCtx);
-}
-
-export async function signIn(
-  _provider?: string,
-  _opts?: Record<string, unknown>
-): Promise<{ error?: string; ok?: boolean }> {
-  return { ok: true };
-}
-
-export async function signOut(_opts?: { callbackUrl?: string }) {
-  return undefined;
+export async function signOut(opts?: { callbackUrl?: string }) {
+  setDeviceToken(null);
+  signOutLocal();
+  if (opts?.callbackUrl) {
+    window.location.hash = `#${opts.callbackUrl.startsWith("/") ? opts.callbackUrl : `/${opts.callbackUrl}`}`;
+  } else {
+    window.location.hash = "#/login";
+  }
+  window.location.reload();
 }

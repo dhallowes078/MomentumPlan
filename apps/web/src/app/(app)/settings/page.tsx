@@ -120,32 +120,90 @@ export default function SettingsPage() {
   const initialWs = useRef(false);
 
   const loadWorkspaceDetail = useCallback(async (wid: string) => {
-    const detail = await fetch(`/api/workspaces/${wid}`).then((r) => r.json());
-    setWorkspaces((prev) =>
-      prev.map((x) => (x.id === wid ? { ...x, ...detail.workspace, role: x.role } : x))
-    );
+    try {
+      const res = await fetch(`/api/workspaces/${wid}`);
+      if (!res.ok) return;
+      const detail = await res.json();
+      if (!detail?.workspace) return;
+      setWorkspaces((prev) =>
+        prev.map((x) => (x.id === wid ? { ...x, ...detail.workspace, role: x.role } : x))
+      );
+    } catch {
+      // Offline — keep local workspace snapshot.
+    }
   }, []);
 
   const load = useCallback(async () => {
-    const [p, w, me, codeRes, integ] = await Promise.all([
-      fetch("/api/prefs").then((r) => r.json()),
-      fetch("/api/workspaces").then((r) => r.json()),
-      fetch("/api/me").then((r) => r.json()),
-      fetch("/api/me/access-code").then((r) => r.json()),
-      fetch("/api/integrations").then((r) => r.json()),
-    ]);
-    setPrefs(p.prefs);
-    setWorkspaces(w.workspaces);
-    setProfile(me.user);
-    setIntegrations(integ);
-    if (codeRes.code) {
-      setAccessCode(codeRes.code);
-      setAccessDisplay(codeRes.display ?? codeRes.code);
+    const localPrefs = await import("@/lib/local/repo").then((m) => m.getPrefs());
+    const localWorkspaces = await import("@/lib/local/repo").then((m) => m.listWorkspaces());
+
+    // Always seed from local Dexie first so Appearance/Schedule show offline.
+    setPrefs({
+      workDays: localPrefs.workDays,
+      startMinutes: localPrefs.startMinutes,
+      endMinutes: localPrefs.endMinutes,
+      breakStartMinutes: localPrefs.breakStartMinutes,
+      breakEndMinutes: localPrefs.breakEndMinutes,
+      planningDays: localPrefs.planningDays,
+      minChunkMinutes: localPrefs.minChunkMinutes,
+      bufferMinutes: localPrefs.bufferMinutes,
+      timezone: localPrefs.timezone,
+      tinyMinutes: localPrefs.tinyMinutes,
+      smallMinutes: localPrefs.smallMinutes,
+      mediumMinutes: localPrefs.mediumMinutes,
+      bigMinutes: localPrefs.bigMinutes,
+      themeColor: localPrefs.themeColor,
+      darkMode: localPrefs.darkMode,
+      notificationsEnabled: localPrefs.notificationsEnabled,
+      notificationSnoozeMinutes: localPrefs.notificationSnoozeMinutes,
+      quietHoursStart: localPrefs.quietHoursStart,
+      quietHoursEnd: localPrefs.quietHoursEnd,
+    });
+    if (localWorkspaces.length) {
+      setWorkspaces(
+        localWorkspaces.map((w) => ({
+          id: w.id,
+          name: w.name,
+          role: w.role ?? "OWNER",
+          buckets: w.buckets,
+          members: w.members.map((u) => ({ user: u, role: "MEMBER" })),
+        }))
+      );
+      if (!activeWs) setActiveWs(localWorkspaces[0].id);
     }
-    const wid = activeWs || w.workspaces[0]?.id;
-    if (wid) {
-      if (!activeWs) setActiveWs(wid);
-      await loadWorkspaceDetail(wid);
+    setProfile((prev) =>
+      prev ?? {
+        id: "local",
+        name: "You",
+        email: "local@device",
+        color: "#3D6B4F",
+        image: null,
+      }
+    );
+
+    try {
+      const [p, w, me, codeRes, integ] = await Promise.all([
+        fetch("/api/prefs").then((r) => (r.ok ? r.json() : null)),
+        fetch("/api/workspaces").then((r) => (r.ok ? r.json() : null)),
+        fetch("/api/me").then((r) => (r.ok ? r.json() : null)),
+        fetch("/api/me/access-code").then((r) => (r.ok ? r.json() : null)),
+        fetch("/api/integrations").then((r) => (r.ok ? r.json() : null)),
+      ]);
+      if (p?.prefs) setPrefs(p.prefs);
+      if (w?.workspaces) setWorkspaces(w.workspaces);
+      if (me?.user) setProfile(me.user);
+      if (integ) setIntegrations(integ);
+      if (codeRes?.code) {
+        setAccessCode(codeRes.code);
+        setAccessDisplay(codeRes.display ?? codeRes.code);
+      }
+      const wid = activeWs || w?.workspaces?.[0]?.id || localWorkspaces[0]?.id;
+      if (wid) {
+        if (!activeWs) setActiveWs(wid);
+        if (w?.workspaces) await loadWorkspaceDetail(wid);
+      }
+    } catch {
+      // Offline / native without link — local seed above is enough.
     }
   }, [activeWs, loadWorkspaceDetail]);
 

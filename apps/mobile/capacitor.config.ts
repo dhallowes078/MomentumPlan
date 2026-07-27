@@ -14,6 +14,10 @@ const config: CapacitorConfig = {
       smallIcon: "ic_stat_icon_config_sample",
       iconColor: "#1f4d3a",
     },
+    StatusBar: {
+      overlaysWebView: false,
+      style: "LIGHT",
+    },
   },
   android: {
     allowMixedContent: true,

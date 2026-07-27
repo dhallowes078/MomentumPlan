@@ -10,7 +10,9 @@ export function LoginPage({
   onLinked: () => void;
 }) {
   const [code, setCode] = useState("");
-  const [apiBase, setApiBase] = useState(getSyncApiBase());
+  const [apiBase, setApiBase] = useState(
+    () => getSyncApiBase() || (import.meta as { env?: Record<string, string> }).env?.VITE_SYNC_API_URL || ""
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

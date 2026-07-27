@@ -1,25 +1,16 @@
 # Momentum Android (local APK)
 
-The installable app is a **bundled SPA** (UI + Dexie on-device). It is **not** a WebView pointed at a website.
+Bundled install of the **same website UI** (Today, Tasks, Calendar, Settings, New Task modal, etc.) plus on-device Dexie storage.
 
-Cloud sync is optional: enter your sync server URL + 6-digit access code (from the web app → Settings → Devices).
+It is **not** a WebView pointed at a live site. API calls are rewritten to your sync server when you link with a device code.
 
-## Develop the SPA
-
-```bash
-npm install -w @momentum/mobile
-npm run dev -w @momentum/mobile
-```
-
-## Build debug APK
-
-1. Start the API on your PC: `npm run dev` (and optionally `npm run tunnel`).
-2. Build + sync + assemble:
+## Build APK
 
 ```powershell
-cd apps\mobile
-# Optional: bake a default sync URL into the client
+# Optional: bake your tunnel as the default sync URL
 $env:VITE_SYNC_API_URL="https://YOUR-tunnel.trycloudflare.com"
+
+cd apps\mobile
 npm run build
 npx cap sync android
 
@@ -29,15 +20,11 @@ cd android
 .\gradlew.bat assembleDebug
 ```
 
-APK path:
+Output: `android/app/build/outputs/apk/debug/app-debug.apk` (also copy to `Momentum-debug.apk` at repo root).
 
-`apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk`
+## First launch
 
-Also copied to repo root as `Momentum-debug.apk` when using the root helper script.
+1. **Use offline only**, or  
+2. Enter sync server URL + 6-digit code from web **Settings → Devices**.
 
-## First launch on phone
-
-1. **Use offline only** — tasks stay on the device, or  
-2. Enter sync server URL + device code → pulls/pushes to the Next.js API.
-
-Google / Microsoft / Facebook login comes later; device code is the bridge for now.
+Keep `npm run dev` (and `npm run tunnel` if needed) running so sync works. Make sure the tunnel points at the same port Next is using.
