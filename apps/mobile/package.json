@@ -10,7 +10,7 @@
     "sync": "npm run build && npx cap sync android",
     "open": "npx cap open android",
     "add:android": "npx cap add android",
-    "apk": "npm run sync && cd android && set JAVA_HOME=C:\\Program Files\\Android\\Android Studio\\jbr&& .\\gradlew.bat assembleDebug"
+    "apk": "npm run sync && node ./scripts/assemble-debug.cjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.4.2",
