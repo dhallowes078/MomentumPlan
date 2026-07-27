@@ -27,12 +27,45 @@ function s3() {
 
 const localRoot = path.join(process.cwd(), "uploads");
 
+type AttachmentsKv = {
+  put: (
+    key: string,
+    value: ArrayBuffer | ArrayBufferView | string,
+    options?: { metadata?: Record<string, string> }
+  ) => Promise<void>;
+  get: (key: string, options: { type: "arrayBuffer" }) => Promise<ArrayBuffer | null>;
+  getWithMetadata: <T>(
+    key: string
+  ) => Promise<{ value: string | null; metadata: T | null }>;
+  delete: (key: string) => Promise<void>;
+};
+
+function getAttachmentsKv(): AttachmentsKv | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getCloudflareContext } = require("@opennextjs/cloudflare") as {
+      getCloudflareContext: () => { env?: { ATTACHMENTS?: AttachmentsKv } };
+    };
+    return getCloudflareContext().env?.ATTACHMENTS ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function storeFile(
   fileName: string,
   mimeType: string,
   data: Buffer
 ): Promise<{ storageKey: string }> {
   const key = `${randomUUID()}-${fileName.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+
+  const kv = getAttachmentsKv();
+  if (kv) {
+    await kv.put(key, data, {
+      metadata: { mimeType, fileName },
+    });
+    return { storageKey: `kv:${key}` };
+  }
 
   if (s3Enabled()) {
     await s3().send(
@@ -61,12 +94,52 @@ export async function getFileUrl(storageKey: string): Promise<string> {
     );
   }
 
-  const key = storageKey.replace(/^local:/, "");
+  const key = storageKey.replace(/^(local:|kv:)/, "");
   return `/api/attachments/file?key=${encodeURIComponent(key)}`;
 }
 
+export async function readStoredFile(
+  key: string
+): Promise<{ data: Buffer; mimeType?: string } | null> {
+  const kv = getAttachmentsKv();
+  if (kv) {
+    // Prefer getWithMetadata when available; fall back to get.
+    try {
+      const withMeta = await (
+        kv as AttachmentsKv & {
+          getWithMetadata: (
+            key: string,
+            options: { type: "arrayBuffer" }
+          ) => Promise<{
+            value: ArrayBuffer | null;
+            metadata: { mimeType?: string } | null;
+          }>;
+        }
+      ).getWithMetadata(key, { type: "arrayBuffer" });
+      if (!withMeta.value) return null;
+      return {
+        data: Buffer.from(withMeta.value),
+        mimeType: withMeta.metadata?.mimeType,
+      };
+    } catch {
+      const raw = await kv.get(key, { type: "arrayBuffer" });
+      if (!raw) return null;
+      return { data: Buffer.from(raw) };
+    }
+  }
+
+  try {
+    const data = await readFile(path.join(localRoot, key));
+    return { data };
+  } catch {
+    return null;
+  }
+}
+
 export async function readLocalFile(key: string): Promise<Buffer> {
-  return readFile(path.join(localRoot, key));
+  const stored = await readStoredFile(key);
+  if (!stored) throw new Error("Not found");
+  return stored.data;
 }
 
 export async function deleteFile(storageKey: string) {
@@ -79,6 +152,12 @@ export async function deleteFile(storageKey: string) {
     );
     return;
   }
-  const key = storageKey.replace(/^local:/, "");
+
+  const key = storageKey.replace(/^(local:|kv:)/, "");
+  const kv = getAttachmentsKv();
+  if (kv && storageKey.startsWith("kv:")) {
+    await kv.delete(key);
+    return;
+  }
   await unlink(path.join(localRoot, key)).catch(() => undefined);
 }

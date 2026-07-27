@@ -9,6 +9,7 @@ const nextConfig: NextConfig = {
     "@capacitor/network",
     "@capacitor/preferences",
   ],
+  serverExternalPackages: ["@prisma/client", ".prisma/client"],
   experimental: {
     serverActions: {
       bodySizeLimit: "10mb",
@@ -17,3 +18,6 @@ const nextConfig: NextConfig = {
 };
 
 export default nextConfig;
+
+import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
+initOpenNextCloudflareForDev();

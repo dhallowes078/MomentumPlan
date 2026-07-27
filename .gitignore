@@ -9,6 +9,12 @@ coverage
 uploads
 .turbo
 *.tsbuildinfo
+.open-next
+.wrangler
+.dev.vars
+apps/web/.open-next
+apps/web/.wrangler
+apps/web/.dev.vars
 apps/web/prisma/*.db
 apps/web/prisma/*.db-journal
 apps/web/uploads

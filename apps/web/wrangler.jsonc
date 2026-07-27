@@ -1,18 +1,41 @@
 /**
  * Cloudflare Workers config for Momentum (OpenNext).
- *
- * Before first Workers deploy:
- * 1. npx wrangler login
- * 2. npm i -w @momentum/web @opennextjs/cloudflare wrangler
- * 3. npx wrangler d1 create momentum  → paste database_id below
- * 4. Wire Prisma D1 adapter (see ../../DEPLOY.md)
- * 5. npm run deploy -w @momentum/web
- *
- * Until then, use `npm run tunnel` for a public Cloudflare URL against local SQLite.
  */
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "momentum",
-  "compatibility_date": "2024-09-23",
-  "compatibility_flags": ["nodejs_compat"]
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2025-07-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "workers_dev": true,
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "services": [
+    {
+      "binding": "WORKER_SELF_REFERENCE",
+      "service": "momentum"
+    }
+  ],
+  "images": {
+    "binding": "IMAGES"
+  },
+  "vars": {
+    "AUTH_ALLOW_LOCAL_LOGIN": "true"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "momentum",
+      "database_id": "a49513b5-2ee0-47ce-b32e-9c1fd1b00296",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "ATTACHMENTS",
+      "id": "440216d764a545f7b05cc63155e7d8d8"
+    }
+  ]
 }

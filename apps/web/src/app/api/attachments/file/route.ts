@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireUser, jsonError } from "@/lib/api";
-import { readLocalFile } from "@/lib/storage";
+import { readStoredFile } from "@/lib/storage";
 
 export async function GET(req: Request) {
   const { error } = await requireUser();
@@ -11,15 +11,13 @@ export async function GET(req: Request) {
     return jsonError("Invalid key", 400);
   }
 
-  try {
-    const data = await readLocalFile(key);
-    return new NextResponse(new Uint8Array(data), {
-      headers: {
-        "Content-Type": "application/octet-stream",
-        "Content-Disposition": `attachment; filename="${key.split("-").slice(1).join("-")}"`,
-      },
-    });
-  } catch {
-    return jsonError("Not found", 404);
-  }
+  const stored = await readStoredFile(key);
+  if (!stored) return jsonError("Not found", 404);
+
+  return new NextResponse(new Uint8Array(stored.data), {
+    headers: {
+      "Content-Type": stored.mimeType || "application/octet-stream",
+      "Content-Disposition": `attachment; filename="${key.split("-").slice(1).join("-")}"`,
+    },
+  });
 }
