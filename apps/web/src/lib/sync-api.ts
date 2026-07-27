@@ -1,39 +1,50 @@
 /**
- * Cross-origin sync helpers for the Capacitor APK and optional remote API base.
+ * Cross-origin sync helpers for the Capacitor APK.
  * On the normal Next web app, base is empty (same-origin).
+ * On the Android app, always the live Cloudflare site — no custom URLs.
  */
 
 const TOKEN_KEY = "momentum_device_token";
 const API_BASE_KEY = "momentum_sync_api_url";
+const LIVE_SYNC_URL = "https://momentum.momentum-app.workers.dev";
 
-function readViteEnv(name: string): string | undefined {
+/** True for the Capacitor / Vite mobile bundle (not the Next.js website). */
+export function isMobileAppBundle(): boolean {
   try {
-    // Vite injects import.meta.env; Next may not.
     const meta = import.meta as { env?: Record<string, string | undefined> };
-    return meta.env?.[name];
+    if (meta.env?.VITE_MOBILE === "1") return true;
+    if (typeof meta.env?.VITE_SYNC_API_URL === "string") return true;
   } catch {
-    return undefined;
+    // ignore
   }
+  if (typeof window !== "undefined") {
+    const cap = (
+      window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }
+    ).Capacitor;
+    if (cap?.isNativePlatform?.()) return true;
+    if (document.documentElement.classList.contains("is-native")) return true;
+  }
+  return false;
+}
+
+/** Drop any old tunnel/LAN URL saved from earlier builds. */
+export function clearStoredSyncApiBase() {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(API_BASE_KEY);
 }
 
 export function getSyncApiBase(): string {
-  if (typeof window !== "undefined") {
-    const stored = window.localStorage.getItem(API_BASE_KEY);
-    if (stored) return stored.replace(/\/$/, "");
+  if (isMobileAppBundle()) {
+    clearStoredSyncApiBase();
+    return LIVE_SYNC_URL;
   }
-  const fromVite = readViteEnv("VITE_SYNC_API_URL");
-  if (fromVite) return fromVite.replace(/\/$/, "");
-  const fromNext =
-    typeof process !== "undefined" ? process.env.NEXT_PUBLIC_SYNC_API_URL : undefined;
-  if (fromNext) return fromNext.replace(/\/$/, "");
+  // Next.js website: same-origin (ignore stale localStorage / env).
   return "";
 }
 
-export function setSyncApiBase(url: string) {
-  if (typeof window === "undefined") return;
-  const cleaned = url.trim().replace(/\/$/, "");
-  if (cleaned) window.localStorage.setItem(API_BASE_KEY, cleaned);
-  else window.localStorage.removeItem(API_BASE_KEY);
+/** @deprecated Custom sync URLs are no longer supported. */
+export function setSyncApiBase(_url: string) {
+  clearStoredSyncApiBase();
 }
 
 export function apiUrl(path: string): string {

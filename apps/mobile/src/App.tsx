@@ -9,7 +9,7 @@ import SettingsPage from "@/app/(app)/settings/page";
 import TaskDetailPage from "@/app/(app)/tasks/[id]/page";
 import { bootLocalSync } from "@/lib/local/sync";
 import { initNotifications } from "@/lib/local/notifications";
-import { getDeviceToken } from "@/lib/sync-api";
+import { getDeviceToken, clearStoredSyncApiBase } from "@/lib/sync-api";
 import { LoginPage } from "./pages/LoginPage";
 
 function FullApp() {
@@ -38,6 +38,7 @@ export function App() {
   });
 
   useEffect(() => {
+    clearStoredSyncApiBase();
     void import("@capacitor/core")
       .then(({ Capacitor }) => {
         if (Capacitor.isNativePlatform()) {

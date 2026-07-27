@@ -6,6 +6,13 @@ import path from "path";
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   base: "./",
+  envPrefix: ["VITE_"],
+  define: {
+    "import.meta.env.VITE_MOBILE": JSON.stringify("1"),
+    "import.meta.env.VITE_SYNC_API_URL": JSON.stringify(
+      "https://momentum.momentum-app.workers.dev"
+    ),
+  },
   build: {
     outDir: "www",
     emptyOutDir: true,

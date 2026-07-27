@@ -1,10 +1,9 @@
 import { useState } from "react";
 import {
   apiUrl,
+  clearStoredSyncApiBase,
   getDeviceToken,
-  getSyncApiBase,
   setDeviceToken,
-  setSyncApiBase,
 } from "@/lib/sync-api";
 import { flushOutbox, pullFromServer, useSyncIndicator } from "./settings-helpers";
 import { requestNotificationPermission, rescheduleTaskNotifications } from "@/lib/local/notifications";
@@ -12,21 +11,15 @@ import * as repo from "@/lib/local/repo";
 
 export function SettingsPage() {
   const sync = useSyncIndicator();
-  const [apiBase, setApiBase] = useState(getSyncApiBase());
   const [code, setCode] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-
-  async function saveApiBase() {
-    setSyncApiBase(apiBase);
-    setMessage("Sync server saved");
-  }
 
   async function link() {
     setBusy(true);
     setMessage(null);
     try {
-      setSyncApiBase(apiBase);
+      clearStoredSyncApiBase();
       const res = await fetch(apiUrl("/api/auth/device-token"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -72,16 +65,9 @@ export function SettingsPage() {
         <h2 style={{ margin: 0, fontSize: "1rem" }}>Cloud sync</h2>
         <p style={{ margin: 0, color: "var(--ink-muted)", fontSize: "0.9rem" }}>
           {getDeviceToken()
-            ? "This phone is linked. Changes flush to the server when online."
-            : "Not linked. Enter the 6-digit code from the web app Devices tab."}
+            ? "This phone is linked to Momentum cloud. Changes flush when online."
+            : "Not linked. Enter the 6-digit code from the website Settings → Devices."}
         </p>
-        <label style={{ display: "grid", gap: "0.3rem", fontSize: "0.85rem" }}>
-          Sync server URL
-          <input className="field" value={apiBase} onChange={(e) => setApiBase(e.target.value)} />
-        </label>
-        <button type="button" className="btn secondary" onClick={() => void saveApiBase()}>
-          Save server URL
-        </button>
         <label style={{ display: "grid", gap: "0.3rem", fontSize: "0.85rem" }}>
           Access code
           <input className="field" value={code} onChange={(e) => setCode(e.target.value)} placeholder="000000" />
