@@ -56,6 +56,36 @@ export async function putPrefs(patch: Partial<LocalPrefs>, sync = true) {
   return next;
 }
 
+export async function createLocalBucket(workspaceId: string, name: string, color: string) {
+  let ws = await getWorkspace(workspaceId);
+  if (!ws) {
+    const seed = await ensureOfflineWorkspace();
+    ws = { ...seed, id: workspaceId, name: seed.name };
+  }
+  const bucket = {
+    id: `local_bucket_${uuid()}`,
+    name: name.trim(),
+    color,
+    workspaceId,
+  };
+  const buckets = [...(ws.buckets ?? []), bucket];
+  await localDb.workspaces.put({ ...ws, id: workspaceId, buckets });
+  return bucket;
+}
+
+export async function updateLocalBucketColor(
+  workspaceId: string,
+  bucketId: string,
+  color: string
+) {
+  const ws = await getWorkspace(workspaceId);
+  if (!ws) return;
+  await localDb.workspaces.put({
+    ...ws,
+    buckets: (ws.buckets ?? []).map((b) => (b.id === bucketId ? { ...b, color } : b)),
+  });
+}
+
 export async function listWorkspaces(): Promise<LocalWorkspace[]> {
   return localDb.workspaces.toArray();
 }

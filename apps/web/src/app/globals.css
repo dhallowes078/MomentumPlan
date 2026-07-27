@@ -344,6 +344,29 @@ select {
   backdrop-filter: blur(8px);
 }
 
+.settings-menus {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.4rem;
+}
+
+.settings-menu-btn {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-muted);
+  border-radius: 12px;
+  padding: 0.65rem 0.75rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.settings-menu-btn[data-active="true"] {
+  color: var(--ink);
+  border-color: color-mix(in srgb, var(--brand) 45%, var(--line));
+  background: color-mix(in srgb, var(--brand) 12%, transparent);
+}
+
 .cal-toolbar {
   display: flex;
   gap: 0.35rem;

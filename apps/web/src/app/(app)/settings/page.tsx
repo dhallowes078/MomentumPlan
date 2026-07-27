@@ -7,9 +7,11 @@ import { THEME_PRESETS } from "@/lib/theme";
 import { useThemePrefs } from "@/components/ThemeProvider";
 import {
   countLocalTestTasks,
+  createLocalBucket,
   disableLocalTestMode,
   enableLocalTestMode,
   putPrefs as putLocalPrefs,
+  updateLocalBucketColor,
 } from "@/lib/local/repo";
 import {
   requestNotificationPermission,
@@ -17,6 +19,7 @@ import {
 } from "@/lib/local/notifications";
 import { flushOutbox } from "@/lib/local/sync";
 import Link from "next/link";
+import { APP_VERSION } from "@/lib/version";
 
 type Prefs = {
   workDays: number[];
@@ -79,18 +82,37 @@ const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const BUCKET_COLORS = ["#3D6B4F", "#2F5D8C", "#8B5E3C", "#7A2E3A", "#0F766E", "#6B4A2F", "#B7791F"];
 const PROFILE_COLORS = ["#3D6B4F", "#2F5D8C", "#8B5E3C", "#7A2E3A", "#0F766E", "#B7791F", "#6B4A2F", "#5B4B8A"];
 
-const TABS = [
-  { id: "profile", label: "Profile" },
-  { id: "devices", label: "Devices" },
-  { id: "notifications", label: "Notifications" },
-  { id: "appearance", label: "Appearance" },
-  { id: "sizes", label: "Sizes" },
-  { id: "schedule", label: "Schedule" },
-  { id: "workspace", label: "Workspace" },
-  { id: "integrations", label: "Integrations" },
-  { id: "test-mode", label: "Test Mode" },
-  { id: "phone", label: "Phone" },
+const SETTINGS_MENUS = [
+  {
+    id: "setup",
+    label: "Setup",
+    sections: [
+      { id: "devices", label: "Devices" },
+      { id: "integrations", label: "Integrations" },
+      { id: "test-mode", label: "Test Mode" },
+      { id: "notifications", label: "Notifications" },
+    ],
+  },
+  {
+    id: "tasks",
+    label: "Task Settings",
+    sections: [
+      { id: "sizes", label: "Job sizes" },
+      { id: "schedule", label: "Schedule" },
+      { id: "workspace", label: "Buckets" },
+    ],
+  },
+  {
+    id: "look",
+    label: "Appearance",
+    sections: [
+      { id: "profile", label: "Profile" },
+      { id: "appearance", label: "Theme" },
+    ],
+  },
 ] as const;
+
+type MenuId = (typeof SETTINGS_MENUS)[number]["id"];
 
 function minutesToInput(m: number) {
   const h = Math.floor(m / 60)
@@ -120,7 +142,8 @@ export default function SettingsPage() {
   const [accessCode, setAccessCode] = useState<string | null>(null);
   const [accessDisplay, setAccessDisplay] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [activeTab, setActiveTab] = useState<string>("profile");
+  const [activeMenu, setActiveMenu] = useState<MenuId>("setup");
+  const [activeTab, setActiveTab] = useState<string>("devices");
   const [testMode, setTestMode] = useState({ active: false, count: 0 });
   const [testModeBusy, setTestModeBusy] = useState(false);
   const [testModeError, setTestModeError] = useState<string | null>(null);
@@ -243,22 +266,42 @@ export default function SettingsPage() {
   }, [activeWs, loadWorkspaceDetail]);
 
   useEffect(() => {
+    const menu = SETTINGS_MENUS.find((m) => m.id === activeMenu);
+    if (!menu) return;
     const onScroll = () => {
-      let current: string = TABS[0].id;
-      for (const tab of TABS) {
+      let current: string = menu.sections[0].id;
+      for (const tab of menu.sections) {
         const el = document.getElementById(`settings-${tab.id}`);
-        if (!el) continue;
-        if (el.getBoundingClientRect().top <= 120) current = tab.id;
+        if (!el || el.hidden) continue;
+        if (el.getBoundingClientRect().top <= 140) current = tab.id;
       }
       setActiveTab(current);
     };
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
-  }, []);
+  }, [activeMenu]);
+
+  function openMenu(id: MenuId) {
+    setActiveMenu(id);
+    const first = SETTINGS_MENUS.find((m) => m.id === id)?.sections[0]?.id;
+    if (first) {
+      setActiveTab(first);
+      window.setTimeout(() => {
+        document.getElementById(`settings-${first}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 50);
+    }
+  }
 
   function jumpTo(id: string) {
     setActiveTab(id);
     document.getElementById(`settings-${id}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function sectionVisible(...ids: string[]) {
+    const menu = SETTINGS_MENUS.find((m) => m.id === activeMenu);
+    if (!menu) return false;
+    const allowed = new Set<string>(menu.sections.map((s) => s.id));
+    return ids.some((id) => allowed.has(id));
   }
 
   async function savePrefs(next?: Partial<Prefs>) {
@@ -357,19 +400,49 @@ export default function SettingsPage() {
   async function addBucket(e: React.FormEvent) {
     e.preventDefault();
     if (!activeWs || !bucketName.trim()) return;
-    const res = await fetch("/api/buckets", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ workspaceId: activeWs, name: bucketName, color: bucketColor }),
-    });
-    if (res.ok) {
-      const { bucket } = await res.json();
-      setWorkspaces((prev) =>
-        prev.map((w) =>
-          w.id === activeWs ? { ...w, buckets: [...(w.buckets ?? []), bucket] } : w
-        )
-      );
+    const name = bucketName.trim();
+    const color = bucketColor;
+    try {
+      const res = await fetch("/api/buckets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspaceId: activeWs, name, color }),
+      });
+      if (res.ok) {
+        const { bucket } = await res.json();
+        setWorkspaces((prev) =>
+          prev.map((w) =>
+            w.id === activeWs ? { ...w, buckets: [...(w.buckets ?? []), bucket] } : w
+          )
+        );
+        const { localDb } = await import("@/lib/local/db");
+        const ws = await localDb.workspaces.get(activeWs);
+        if (ws && !ws.buckets.some((b) => b.id === bucket.id)) {
+          await localDb.workspaces.put({
+            ...ws,
+            buckets: [
+              ...ws.buckets,
+              {
+                id: bucket.id,
+                name: bucket.name,
+                color: bucket.color ?? color,
+                workspaceId: activeWs,
+              },
+            ],
+          });
+        }
+        setBucketName("");
+        return;
+      }
+    } catch {
+      /* local fallback */
     }
+    const bucket = await createLocalBucket(activeWs, name, color);
+    setWorkspaces((prev) =>
+      prev.map((w) =>
+        w.id === activeWs ? { ...w, buckets: [...(w.buckets ?? []), bucket] } : w
+      )
+    );
     setBucketName("");
   }
 
@@ -384,11 +457,17 @@ export default function SettingsPage() {
             }
       )
     );
-    await fetch(`/api/buckets/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ color }),
-    });
+    try {
+      const res = await fetch(`/api/buckets/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ color }),
+      });
+      if (res.ok) return;
+    } catch {
+      /* local */
+    }
+    await updateLocalBucketColor(activeWs, id, color);
   }
 
   async function enableTestMode() {
@@ -494,23 +573,57 @@ export default function SettingsPage() {
 
   return (
     <div className="page-wrap rise">
-      <div>
-        <h1
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "end",
+          gap: "1rem",
+          flexWrap: "wrap",
+        }}
+      >
+        <div>
+          <h1
+            style={{
+              margin: 0,
+              fontFamily: "var(--font-display), serif",
+              fontSize: "1.85rem",
+            }}
+          >
+            Settings
+          </h1>
+          <p style={{ margin: "0.35rem 0 0", color: "var(--ink-muted)" }}>
+            Setup, task defaults, and how Momentum looks.
+          </p>
+        </div>
+        <span
           style={{
-            margin: 0,
-            fontFamily: "var(--font-display), serif",
-            fontSize: "1.85rem",
+            fontSize: "0.78rem",
+            color: "var(--ink-muted)",
+            fontVariantNumeric: "tabular-nums",
           }}
+          title="App version"
         >
-          Settings
-        </h1>
-        <p style={{ margin: "0.35rem 0 0", color: "var(--ink-muted)" }}>
-          Profile, devices, theme, schedule, workspace, and integrations.
-        </p>
+          v{APP_VERSION}
+        </span>
       </div>
 
+      <nav className="settings-menus" aria-label="Settings menus">
+        {SETTINGS_MENUS.map((menu) => (
+          <button
+            key={menu.id}
+            type="button"
+            className="settings-menu-btn"
+            data-active={activeMenu === menu.id ? "true" : "false"}
+            onClick={() => openMenu(menu.id)}
+          >
+            {menu.label}
+          </button>
+        ))}
+      </nav>
+
       <nav className="settings-tabs" aria-label="Settings sections">
-        {TABS.map((tab) => (
+        {SETTINGS_MENUS.find((m) => m.id === activeMenu)?.sections.map((tab) => (
           <button
             key={tab.id}
             type="button"
@@ -523,7 +636,7 @@ export default function SettingsPage() {
         ))}
       </nav>
 
-      {profile && (
+      {sectionVisible("profile") && profile && (
         <section
           id="settings-profile"
           className="card settings-section"
@@ -613,6 +726,7 @@ export default function SettingsPage() {
         </section>
       )}
 
+      {sectionVisible("devices") && (
       <section
         id="settings-devices"
         className="card settings-section"
@@ -654,8 +768,9 @@ export default function SettingsPage() {
           </div>
         </div>
       </section>
+      )}
 
-      {prefs && (
+      {prefs && sectionVisible("notifications") && (
         <section
           id="settings-notifications"
           className="card settings-section"
@@ -743,8 +858,7 @@ export default function SettingsPage() {
         </section>
       )}
 
-      {prefs && (
-        <>
+      {prefs && sectionVisible("appearance") && (
           <section
             id="settings-appearance"
             className="card settings-section"
@@ -790,7 +904,9 @@ export default function SettingsPage() {
               </div>
             </div>
           </section>
+      )}
 
+      {prefs && sectionVisible("sizes") && (
           <section
             id="settings-sizes"
             className="card settings-section"
@@ -826,7 +942,9 @@ export default function SettingsPage() {
               {saved ? "Saved" : "Save size presets"}
             </button>
           </section>
+      )}
 
+      {prefs && sectionVisible("schedule") && (
           <form
             id="settings-schedule"
             className="card settings-section"
@@ -948,15 +1066,15 @@ export default function SettingsPage() {
               {saved ? "Saved" : "Save preferences"}
             </button>
           </form>
-        </>
       )}
 
+      {sectionVisible("workspace") && (
       <section
         id="settings-workspace"
         className="card settings-section"
         style={{ padding: "1rem", display: "grid", gap: "0.75rem" }}
       >
-        <h2 style={{ margin: 0, fontSize: "1rem" }}>Workspace & buckets</h2>
+        <h2 style={{ margin: 0, fontSize: "1rem" }}>Buckets</h2>
         <select className="field" value={activeWs} onChange={(e) => setActiveWs(e.target.value)}>
           {workspaces.map((w) => (
             <option key={w.id} value={w.id}>
@@ -1094,7 +1212,9 @@ export default function SettingsPage() {
           </div>
         )}
       </section>
+      )}
 
+      {sectionVisible("integrations") && (
       <section
         id="settings-integrations"
         className="card settings-section"
@@ -1171,7 +1291,9 @@ export default function SettingsPage() {
           ))}
         </div>
       </section>
+      )}
 
+      {sectionVisible("test-mode") && (
       <section
         id="settings-test-mode"
         className="card settings-section"
@@ -1248,7 +1370,9 @@ export default function SettingsPage() {
           </p>
         )}
       </section>
+      )}
 
+      {false && (
       <section id="settings-phone" className="card settings-section" style={{ padding: "1rem" }}>
         <h2 style={{ margin: "0 0 0.5rem", fontSize: "1rem" }}>Phone app</h2>
         <p style={{ margin: "0 0 0.65rem", color: "var(--ink-muted)", fontSize: "0.9rem" }}>
@@ -1258,10 +1382,13 @@ export default function SettingsPage() {
           Sign in with your 6-digit device code from the Devices tab.
         </p>
       </section>
+      )}
 
-      <button className="btn secondary" onClick={() => signOut({ callbackUrl: "/login" })}>
-        Sign out
-      </button>
+      {activeMenu === "setup" && (
+        <button className="btn secondary" onClick={() => signOut({ callbackUrl: "/login" })}>
+          Sign out
+        </button>
+      )}
     </div>
   );
 }

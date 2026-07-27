@@ -1,0 +1,32 @@
+---
+description: Always rebuild the Android APK after app changes
+alwaysApply: true
+---
+
+# Always update the APK
+
+Whenever you change code that ships in the mobile app (shared web UI under `apps/web/src`, mobile app under `apps/mobile`, CSS, scheduler used on-device, etc.), **rebuild the debug APK before finishing** — do not wait for the user to ask.
+
+## Rebuild steps (Windows)
+
+1. Prefer the current Cloudflare tunnel URL for `VITE_SYNC_API_URL` if a tunnel is running; otherwise keep the last known sync URL or omit it (user can enter URL on device).
+2. From repo root:
+
+```powershell
+$env:VITE_SYNC_API_URL="https://YOUR-tunnel.trycloudflare.com"
+npm run build -w @momentum/mobile
+cd apps\mobile
+npx cap sync android
+$env:JAVA_HOME="C:\Program Files\Android\Android Studio\jbr"
+$env:ANDROID_HOME="$env:LOCALAPPDATA\Android\Sdk"
+cd android
+.\gradlew.bat assembleDebug --no-daemon
+Copy-Item "app\build\outputs\apk\debug\app-debug.apk" "..\..\..\Momentum-debug.apk" -Force
+```
+
+3. Tell the user the APK was updated at `Momentum-debug.apk` (repo root).
+
+## Exceptions
+
+- Pure docs / rules / non-runtime edits: skip APK rebuild.
+- If Gradle/Java fails, report the error and still leave www/`cap sync` done if the web bundle built.

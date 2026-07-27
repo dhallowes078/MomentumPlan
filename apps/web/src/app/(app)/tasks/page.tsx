@@ -2,13 +2,15 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { GripVertical, Plus, RotateCcw } from "lucide-react";
+import { ArrowDownWideNarrow, Folders, GripVertical, Plus, RotateCcw } from "lucide-react";
 import { formatMinutes, priorityColor } from "@/lib/format";
 import { NewTaskModal } from "@/components/NewTaskModal";
 import { useLocalTasks, useLocalWorkspaces } from "@/lib/local/hooks";
 import * as repo from "@/lib/local/repo";
 import type { LocalTask } from "@/lib/local/db";
 import { flushOutbox, pullFromServer } from "@/lib/local/sync";
+
+type SortMode = "manual" | "priority" | "bucket";
 
 export default function TasksPage() {
   const workspaces = useLocalWorkspaces();
@@ -18,6 +20,7 @@ export default function TasksPage() {
   const [assigneeFilter, setAssigneeFilter] = useState("all");
   const [priorityFilter, setPriorityFilter] = useState("all");
   const [tab, setTab] = useState<"open" | "completed">("open");
+  const [sortMode, setSortMode] = useState<SortMode>("manual");
   const [createOpen, setCreateOpen] = useState(false);
   const [createMode, setCreateMode] = useState<"simple" | "full">("simple");
   const [ordered, setOrdered] = useState<LocalTask[]>([]);
@@ -37,6 +40,11 @@ export default function TasksPage() {
   const members = current?.members ?? [];
 
   const visible = useMemo(() => {
+    const bucketLabel = (t: LocalTask) => {
+      if (t.bucket?.name) return t.bucket.name;
+      const b = current?.buckets?.find((x) => x.id === t.bucketId);
+      return b?.name ?? "\uffff";
+    };
     return tasks
       .filter((t) => {
         if (tab === "completed") {
@@ -55,11 +63,22 @@ export default function TasksPage() {
           const bd = b.completedAt ? new Date(b.completedAt).getTime() : 0;
           return bd - ad;
         }
+        if (sortMode === "priority") {
+          if (a.priority !== b.priority) return b.priority - a.priority;
+          return a.title.localeCompare(b.title);
+        }
+        if (sortMode === "bucket") {
+          const an = bucketLabel(a);
+          const bn = bucketLabel(b);
+          if (an !== bn) return an.localeCompare(bn);
+          if (a.priority !== b.priority) return b.priority - a.priority;
+          return a.title.localeCompare(b.title);
+        }
         if (a.position !== b.position) return a.position - b.position;
         if (a.priority !== b.priority) return b.priority - a.priority;
         return a.title.localeCompare(b.title);
       });
-  }, [tasks, tab, bucketFilter, assigneeFilter, priorityFilter]);
+  }, [tasks, tab, bucketFilter, assigneeFilter, priorityFilter, sortMode, current?.buckets]);
 
   useEffect(() => {
     if (dragIndex == null) setOrdered(visible);
@@ -154,12 +173,12 @@ export default function TasksPage() {
     await pullFromServer();
   }
 
-  const canReorder = tab === "open";
+  const canReorder = tab === "open" && sortMode === "manual";
   const list = canReorder ? ordered : visible;
 
   return (
     <div className="page-wrap rise">
-      <div style={{ display: "flex", justifyContent: "space-between", gap: "1rem", alignItems: "end" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: "1rem", alignItems: "end", flexWrap: "wrap" }}>
         <div>
           <h1
             style={{
@@ -175,15 +194,45 @@ export default function TasksPage() {
             {canReorder ? " Drag the handle to reorder." : ""}
           </p>
         </div>
-        <button
-          className="btn"
-          onClick={() => {
-            setCreateMode("simple");
-            setCreateOpen(true);
-          }}
-        >
-          <Plus size={16} /> New
-        </button>
+        <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap", justifyContent: "flex-end" }}>
+          <button
+            type="button"
+            className="btn secondary"
+            title="Sort by priority"
+            aria-pressed={sortMode === "priority"}
+            style={
+              sortMode === "priority"
+                ? { background: "color-mix(in srgb, var(--brand) 14%, transparent)" }
+                : undefined
+            }
+            onClick={() => setSortMode((m) => (m === "priority" ? "manual" : "priority"))}
+          >
+            <ArrowDownWideNarrow size={16} /> Priority
+          </button>
+          <button
+            type="button"
+            className="btn secondary"
+            title="Sort by bucket, then priority"
+            aria-pressed={sortMode === "bucket"}
+            style={
+              sortMode === "bucket"
+                ? { background: "color-mix(in srgb, var(--brand) 14%, transparent)" }
+                : undefined
+            }
+            onClick={() => setSortMode((m) => (m === "bucket" ? "manual" : "bucket"))}
+          >
+            <Folders size={16} /> Buckets
+          </button>
+          <button
+            className="btn"
+            onClick={() => {
+              setCreateMode("simple");
+              setCreateOpen(true);
+            }}
+          >
+            <Plus size={16} /> New
+          </button>
+        </div>
       </div>
 
       <div className="filter-bar">
