@@ -3,10 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Check, GripVertical, RefreshCw, TriangleAlert } from "lucide-react";
+import { format } from "date-fns";
 import { formatMinutes, formatTime, priorityColor } from "@/lib/format";
 import { useLocalToday } from "@/lib/local/hooks";
 import * as repo from "@/lib/local/repo";
-import { flushOutbox, pullFromServer } from "@/lib/local/sync";
+import { flushOutbox } from "@/lib/local/sync";
 
 export function TodayView() {
   const { blocks: liveBlocks, backlog, atRisk } = useLocalToday();
@@ -24,10 +25,16 @@ export function TodayView() {
 
   async function reschedule() {
     setScheduling(true);
-    await repo.enqueue({ type: "runScheduler" });
-    await flushOutbox();
-    await pullFromServer();
-    setScheduling(false);
+    try {
+      const { runLocalScheduler } = await import("@/lib/local/scheduler");
+      await runLocalScheduler();
+      await repo.enqueue({ type: "runScheduler" });
+      await flushOutbox();
+      const { canSyncRemote, pullFromServer } = await import("@/lib/local/sync");
+      if (canSyncRemote()) await pullFromServer();
+    } finally {
+      setScheduling(false);
+    }
   }
 
   async function complete(taskId: string) {
@@ -131,16 +138,34 @@ export function TodayView() {
     <div className="page-wrap rise">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "end", gap: "1rem" }}>
         <div>
-          <h1
+          <div
             style={{
-              margin: 0,
-              fontFamily: "var(--font-display), serif",
-              fontSize: "1.85rem",
-              letterSpacing: "-0.02em",
+              display: "flex",
+              alignItems: "baseline",
+              gap: "0.75rem",
+              flexWrap: "wrap",
             }}
           >
-            Today
-          </h1>
+            <h1
+              style={{
+                margin: 0,
+                fontFamily: "var(--font-display), serif",
+                fontSize: "1.85rem",
+                letterSpacing: "-0.02em",
+              }}
+            >
+              Today
+            </h1>
+            <span
+              style={{
+                color: "var(--ink-muted)",
+                fontSize: "1rem",
+                fontWeight: 500,
+              }}
+            >
+              {format(new Date(), "EEEE, d MMMM")}
+            </span>
+          </div>
           <p style={{ margin: "0.35rem 0 0", color: "var(--ink-muted)" }}>
             Local-first — changes save to this device, then sync to the cloud.
           </p>

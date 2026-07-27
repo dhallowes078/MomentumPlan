@@ -48,8 +48,8 @@ export type ScheduleResult = {
 };
 
 const MS_PER_MIN = 60_000;
-/** All task placements snap to :00 / :15 / :30 / :45. */
-export const SCHEDULE_GRID_MINUTES = 15;
+/** All task placements snap to 5-minute marks. */
+export const SCHEDULE_GRID_MINUTES = 5;
 
 function startOfDay(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
@@ -71,13 +71,13 @@ function atMinutes(day: Date, minutes: number): Date {
   return x;
 }
 
-/** Round a duration up to the next 15-minute step (minimum one step). */
+/** Round a duration up to the next grid step (minimum one step). */
 export function roundUpToGrid(minutes: number, grid = SCHEDULE_GRID_MINUTES): number {
   const safe = Math.max(grid, minutes);
   return Math.ceil(safe / grid) * grid;
 }
 
-/** Snap a wall-clock time up to the next :00/:15/:30/:45. */
+/** Snap a wall-clock time up to the next grid mark. */
 export function ceilToGrid(d: Date, grid = SCHEDULE_GRID_MINUTES): Date {
   const x = new Date(d);
   x.setSeconds(0, 0);
@@ -88,7 +88,7 @@ export function ceilToGrid(d: Date, grid = SCHEDULE_GRID_MINUTES): Date {
   return x;
 }
 
-/** Snap a wall-clock time down to :00/:15/:30/:45. */
+/** Snap a wall-clock time down to the previous grid mark. */
 export function floorToGrid(d: Date, grid = SCHEDULE_GRID_MINUTES): Date {
   const x = new Date(d);
   x.setSeconds(0, 0);
@@ -238,7 +238,7 @@ function takeFromSlots(
     return null;
   }
 
-  // Split across slots, always starting on a 15-minute mark.
+  // Split across slots, always starting on a grid mark.
   let left = neededMs;
   const placements: BusyBlock[] = [];
   const next: BusyBlock[] = [];
@@ -280,6 +280,36 @@ function takeFromSlots(
   return { placements, remainingSlots: next };
 }
 
+function subtractInterval(slots: BusyBlock[], start: Date, end: Date): BusyBlock[] {
+  if (end.getTime() <= start.getTime()) return slots;
+  const out: BusyBlock[] = [];
+  for (const s of slots) {
+    if (end <= s.start || start >= s.end) {
+      out.push(s);
+      continue;
+    }
+    if (s.start < start) out.push({ start: s.start, end: start });
+    if (s.end > end) out.push({ start: end, end: s.end });
+  }
+  return out;
+}
+
+/** Remove a trailing gap after each placement so the next task cannot butt up against it. */
+function applyBufferAfterPlacements(
+  slots: BusyBlock[],
+  placements: BusyBlock[],
+  bufferMinutes: number
+): BusyBlock[] {
+  if (bufferMinutes <= 0 || placements.length === 0) return slots;
+  const bufferMs = bufferMinutes * MS_PER_MIN;
+  let next = slots;
+  for (const p of placements) {
+    const gapEnd = new Date(p.end.getTime() + bufferMs);
+    next = subtractInterval(next, p.end, gapEnd);
+  }
+  return next;
+}
+
 /**
  * Greedy Motion-style packer: priority → due date → created,
  * earliest free slots within work hours.
@@ -291,7 +321,7 @@ export function packSchedule(
   prefs: SchedulerPrefs
 ): ScheduleResult {
   const planningEnd = addDays(now, prefs.planningDays);
-  // Start packing from the next 15-minute mark so nothing lands off-grid.
+  // Start packing from the next grid mark so nothing lands off-grid.
   const packFrom = ceilToGrid(now);
   let slots = freeSlots(packFrom, planningEnd, busy, prefs);
 
@@ -313,6 +343,7 @@ export function packSchedule(
   }
   if (lockedBusy.length) {
     slots = freeSlots(packFrom, planningEnd, [...busy, ...lockedBusy], prefs);
+    slots = applyBufferAfterPlacements(slots, lockedBusy, prefs.bufferMinutes);
   }
 
   const candidates = sortTasks(
@@ -338,7 +369,11 @@ export function packSchedule(
       continue;
     }
 
-    slots = taken.remainingSlots;
+    slots = applyBufferAfterPlacements(
+      taken.remainingSlots,
+      taken.placements,
+      prefs.bufferMinutes
+    );
     // Use first contiguous placement as primary; additional chunks as extra placements
     for (const p of taken.placements) {
       const atRisk = Boolean(task.dueAt && p.end > task.dueAt);
@@ -364,5 +399,5 @@ export const DEFAULT_PREFS: SchedulerPrefs = {
   },
   planningDays: 14,
   minChunkMinutes: 15,
-  bufferMinutes: 0,
+  bufferMinutes: 5,
 };

@@ -265,6 +265,26 @@ export async function pullFromServer() {
 
 export async function flushOutbox() {
   if (flushing) return;
+
+  // Local packer can run without network / device token.
+  const pending = await localDb.outbox.orderBy("createdAt").toArray();
+  for (const item of pending) {
+    if (item.op.type !== "runScheduler") continue;
+    try {
+      const { runLocalScheduler } = await import("./scheduler");
+      await runLocalScheduler();
+      if (canSyncRemote() && (typeof navigator === "undefined" || navigator.onLine)) {
+        await apiFetch("/api/schedule/run", { method: "POST" }).catch(() => undefined);
+      }
+      await localDb.outbox.delete(item.id);
+    } catch (e) {
+      await localDb.outbox.update(item.id, {
+        tries: item.tries + 1,
+        lastError: e instanceof Error ? e.message : "local schedule failed",
+      });
+    }
+  }
+
   if (typeof navigator !== "undefined" && !navigator.onLine) {
     setStatus("offline");
     return;
@@ -336,7 +356,10 @@ export async function flushOutbox() {
           });
           if (!res.ok) throw new Error(`prefs ${res.status}`);
         } else if (op.type === "runScheduler") {
-          await apiFetch("/api/schedule/run", { method: "POST" });
+          // Should already be drained above; keep as safety net.
+          const { runLocalScheduler } = await import("./scheduler");
+          await runLocalScheduler();
+          await apiFetch("/api/schedule/run", { method: "POST" }).catch(() => undefined);
         }
         await localDb.outbox.delete(item.id);
       } catch (e) {

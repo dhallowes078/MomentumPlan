@@ -38,13 +38,19 @@ export function App() {
   });
 
   useEffect(() => {
-    document.documentElement.classList.add("is-native");
+    void import("@capacitor/core")
+      .then(({ Capacitor }) => {
+        if (Capacitor.isNativePlatform()) {
+          document.documentElement.classList.add("is-native");
+        }
+      })
+      .catch(() => undefined);
     void bootLocalSync().finally(() => setReady(true));
     void initNotifications().catch(() => undefined);
     void import("@capacitor/status-bar")
       .then(async ({ StatusBar, Style }) => {
-        await StatusBar.setOverlaysWebView({ overlay: false });
-        await StatusBar.setStyle({ style: Style.Light });
+        // Best-effort on older Android; Android 15+ relies on CSS safe-area insets.
+        await StatusBar.setStyle({ style: Style.Light }).catch(() => undefined);
       })
       .catch(() => undefined);
   }, []);

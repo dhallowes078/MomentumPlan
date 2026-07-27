@@ -220,15 +220,173 @@ export async function outboxCount() {
 /** Seed a local-only workspace when the device has never synced. */
 export async function ensureOfflineWorkspace(): Promise<LocalWorkspace> {
   const existing = await localDb.workspaces.toArray();
-  if (existing[0]) return existing[0];
+  if (existing[0]) {
+    if (!existing[0].members?.length) {
+      const patched: LocalWorkspace = {
+        ...existing[0],
+        members: [{ id: "local-me", name: "Me", email: "me@local", color: "#3D6B4F" }],
+      };
+      await localDb.workspaces.put(patched);
+      return patched;
+    }
+    return existing[0];
+  }
   const ws: LocalWorkspace = {
     id: "local-workspace",
     name: "My plan",
     buckets: [
       { id: "local-bucket-general", name: "General", color: "#3D6B4F", workspaceId: "local-workspace" },
     ],
-    members: [],
+    members: [{ id: "local-me", name: "Me", email: "me@local", color: "#3D6B4F" }],
   };
   await localDb.workspaces.put(ws);
   return ws;
+}
+
+const TEST_MARKER = "[momentum-test-mode]";
+
+const LOCAL_TEST_BUCKETS = [
+  { idSuffix: "work", name: "🧪 Test · Work", color: "#2F5D8C" },
+  { idSuffix: "personal", name: "🧪 Test · Personal", color: "#8B5E3C" },
+  { idSuffix: "urgent", name: "🧪 Test · Urgent", color: "#A33B2D" },
+  { idSuffix: "admin", name: "🧪 Test · Admin", color: "#0F766E" },
+] as const;
+
+function testDueAt(daysFromNow: number, hour = 17) {
+  const date = new Date();
+  date.setDate(date.getDate() + daysFromNow);
+  date.setHours(hour, 0, 0, 0);
+  return date.toISOString();
+}
+
+export async function countLocalTestTasks(workspaceId?: string) {
+  const tasks = workspaceId
+    ? await listTasks(workspaceId)
+    : await localDb.tasks.toArray();
+  return tasks.filter((t) => t.notes?.includes(TEST_MARKER)).length;
+}
+
+export async function enableLocalTestMode(workspaceId: string) {
+  const existing = await countLocalTestTasks(workspaceId);
+  if (existing > 0) return { count: existing, alreadyActive: true };
+
+  let ws = await getWorkspace(workspaceId);
+  if (!ws) {
+    const seed = await ensureOfflineWorkspace();
+    ws = {
+      ...seed,
+      id: workspaceId,
+      name: seed.name,
+    };
+  }
+
+  const bucketIds = new Map<string, string>();
+  const buckets = [...(ws.buckets ?? [])];
+
+  for (const bucket of LOCAL_TEST_BUCKETS) {
+    const id = `local-test-bucket-${bucket.idSuffix}`;
+    const found = buckets.find((b) => b.id === id || b.name === bucket.name);
+    if (!found) {
+      buckets.push({ id, name: bucket.name, color: bucket.color, workspaceId });
+      bucketIds.set(bucket.idSuffix, id);
+    } else {
+      bucketIds.set(bucket.idSuffix, found.id);
+    }
+  }
+
+  const me =
+    ws.members[0]?.id ??
+    ({ id: "local-me", name: "Me", email: "me@local", color: "#3D6B4F" } as const).id;
+  const members = ws.members.length
+    ? ws.members
+    : [{ id: "local-me", name: "Me", email: "me@local", color: "#3D6B4F" }];
+
+  await localDb.workspaces.put({ ...ws, id: workspaceId, buckets, members });
+
+  const samples = [
+    { title: "Submit quarterly report", bucket: "urgent", priority: 5, estimateMinutes: 90, due: -1, notes: "Overdue high-priority task." },
+    { title: "Prepare client presentation", bucket: "work", priority: 5, estimateMinutes: 120, due: 0, notes: "Due today with a larger estimate." },
+    { title: "Call the dentist", bucket: "personal", priority: 4, estimateMinutes: 15, due: 0, notes: "Small personal task due today." },
+    { title: "Review pull request", bucket: "work", priority: 4, estimateMinutes: 45, due: 1, notes: "Technical review sample." },
+    { title: "Renew home insurance", bucket: "admin", priority: 4, estimateMinutes: 30, due: 2, notes: "Administrative near-term task." },
+    { title: "Plan next sprint", bucket: "work", priority: 3, estimateMinutes: 60, due: 3, notes: "Medium scheduling sample." },
+    { title: "Book train tickets", bucket: "personal", priority: 3, estimateMinutes: 30, due: 4, notes: "Personal future deadline." },
+    { title: "Process inbox", bucket: "admin", priority: 3, estimateMinutes: 25, due: 1, notes: "Short admin task." },
+    { title: "Draft project brief", bucket: "work", priority: 2, estimateMinutes: 75, due: 7, notes: "Lower-priority work item." },
+    { title: "Buy birthday gift", bucket: "personal", priority: 2, estimateMinutes: 45, due: 10, notes: "Future personal task." },
+    { title: "Archive old documents", bucket: "admin", priority: 1, estimateMinutes: 120, due: 14, notes: "Large low-priority task." },
+    { title: "Read industry newsletter", bucket: "work", priority: 1, estimateMinutes: 20, due: 5, notes: "Tiny low-priority task." },
+    { title: "Complete onboarding checklist", bucket: "admin", priority: 3, estimateMinutes: 30, due: -2, notes: "Completed sample task.", done: true },
+    { title: "Weekly planning review", bucket: "work", priority: 4, estimateMinutes: 40, due: 6, notes: "Recurring weekly sample.", isRecurring: true },
+  ];
+
+  for (const sample of samples) {
+    const task = await createLocalTask({
+      workspaceId,
+      title: sample.title,
+      notes: `${sample.notes}\n\n${TEST_MARKER}`,
+      priority: sample.priority,
+      estimateMinutes: sample.estimateMinutes,
+      bucketId: bucketIds.get(sample.bucket) ?? null,
+      assigneeId: me,
+      dueAt: testDueAt(sample.due),
+      isRecurring: Boolean(sample.isRecurring),
+      recurFreq: sample.isRecurring ? "WEEKLY" : null,
+    });
+    if (sample.done) {
+      await patchLocalTask(task.id, {
+        status: "DONE",
+        completedAt: new Date().toISOString(),
+      });
+    }
+  }
+
+  await enqueue({ type: "runScheduler" });
+  const { runLocalScheduler } = await import("./scheduler");
+  await runLocalScheduler();
+  return { count: samples.length, alreadyActive: false };
+}
+
+export async function disableLocalTestMode(workspaceId?: string) {
+  const allTasks = await localDb.tasks.toArray();
+  const testTasks = allTasks.filter(
+    (t) =>
+      t.notes?.includes(TEST_MARKER) &&
+      (!workspaceId || t.workspaceId === workspaceId)
+  );
+  const removedIds = new Set(testTasks.map((t) => t.id));
+
+  await localDb.transaction("rw", localDb.tasks, localDb.scheduleBlocks, localDb.workspaces, async () => {
+    for (const task of testTasks) {
+      await localDb.tasks.delete(task.id);
+    }
+
+    const blocks = await localDb.scheduleBlocks.toArray();
+    const blockIds = blocks.filter((b) => removedIds.has(b.taskId)).map((b) => b.id);
+    if (blockIds.length) await localDb.scheduleBlocks.bulkDelete(blockIds);
+
+    const workspaces = await localDb.workspaces.toArray();
+    for (const ws of workspaces) {
+      if (workspaceId && ws.id !== workspaceId) continue;
+      const nextBuckets = (ws.buckets ?? []).filter(
+        (b) =>
+          !LOCAL_TEST_BUCKETS.some(
+            (tb) => tb.name === b.name || b.id === `local-test-bucket-${tb.idSuffix}`
+          )
+      );
+      if (nextBuckets.length !== (ws.buckets ?? []).length) {
+        await localDb.workspaces.put({ ...ws, buckets: nextBuckets });
+      }
+    }
+  });
+
+  // Repack remaining real tasks so calendar/today stay consistent.
+  try {
+    const { runLocalScheduler } = await import("./scheduler");
+    await runLocalScheduler();
+  } catch {
+    /* offline packer optional */
+  }
+
+  return { removed: testTasks.length };
 }

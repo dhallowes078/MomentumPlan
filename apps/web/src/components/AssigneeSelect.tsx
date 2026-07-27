@@ -12,10 +12,12 @@ export function AssigneeSelect({
   members,
   value,
   onChange,
+  meId,
 }: {
   members: Member[];
   value: string;
   onChange: (id: string) => void;
+  meId?: string;
 }) {
   const selected = members.find((m) => m.id === value);
 
@@ -58,7 +60,7 @@ export function AssigneeSelect({
         <option value="">Unassigned</option>
         {members.map((m) => (
           <option key={m.id} value={m.id}>
-            {m.name ?? m.email}
+            {meId && m.id === meId ? "Me" : (m.name ?? m.email)}
           </option>
         ))}
       </select>

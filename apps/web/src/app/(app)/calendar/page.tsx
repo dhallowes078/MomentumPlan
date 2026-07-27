@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { addDays, format, startOfDay } from "date-fns";
-import { RefreshCw } from "lucide-react";
+import { GalleryHorizontal, GalleryVertical, RefreshCw } from "lucide-react";
 import { priorityColor } from "@/lib/format";
 import {
   useLocalMeetings,
@@ -11,7 +11,7 @@ import {
   useLocalScheduleBlocks,
 } from "@/lib/local/hooks";
 import * as repo from "@/lib/local/repo";
-import { flushOutbox, pullFromServer } from "@/lib/local/sync";
+import { canSyncRemote, flushOutbox, pullFromServer } from "@/lib/local/sync";
 
 type TimedItem = {
   id: string;
@@ -124,20 +124,64 @@ export default function CalendarPage() {
     return () => window.removeEventListener("resize", update);
   }, []);
 
+  // If tasks exist but nothing is packed yet (e.g. Test Mode offline), pack locally.
   useEffect(() => {
-    if (!days.length) return;
+    let cancelled = false;
+    void (async () => {
+      const todos = await localDbTasksOpen();
+      if (cancelled || !todos) return;
+      if (blocks.length > 0) return;
+      const { runLocalScheduler } = await import("@/lib/local/scheduler");
+      await runLocalScheduler();
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Scroll today's column into view once — don't re-run on toolbar clicks or data updates
+  // (that was scrolling the page and hiding the Calendar heading).
+  const didScrollToToday = useRef(false);
+  useEffect(() => {
+    if (!days.length || didScrollToToday.current) return;
     const id = window.setTimeout(() => {
-      todayRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "start" });
+      const el = todayRef.current;
+      if (!el) return;
+      const scroller =
+        el.closest<HTMLElement>(".cal-horizontal") ??
+        el.closest<HTMLElement>(".cal-vertical-scroll") ??
+        null;
+      if (scroller && scroller.scrollWidth > scroller.clientWidth) {
+        const left = Math.max(0, el.offsetLeft - 12);
+        scroller.scrollTo({ left, behavior: "smooth" });
+      } else {
+        el.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+      }
+      didScrollToToday.current = true;
     }, 120);
     return () => window.clearTimeout(id);
-  }, [days, view, data]);
+  }, [days]);
+
+  async function localDbTasksOpen() {
+    const { localDb } = await import("@/lib/local/db");
+    const count = await localDb.tasks
+      .filter((t) => t.status === "TODO" || t.status === "IN_PROGRESS")
+      .count();
+    return count > 0;
+  }
 
   async function reschedule() {
     setScheduling(true);
-    await repo.enqueue({ type: "runScheduler" });
-    await flushOutbox();
-    await pullFromServer();
-    setScheduling(false);
+    try {
+      const { runLocalScheduler } = await import("@/lib/local/scheduler");
+      await runLocalScheduler();
+      await repo.enqueue({ type: "runScheduler" });
+      await flushOutbox();
+      if (canSyncRemote()) await pullFromServer();
+    } finally {
+      setScheduling(false);
+    }
   }
 
   const daySpan = Math.max(endMinutes - startMinutes, 60);
@@ -215,48 +259,63 @@ export default function CalendarPage() {
 
   return (
     <div className={`page-wrap wide rise ${view === "vertical" ? "cal-page-vertical" : ""}`}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: "1rem", alignItems: "end" }}>
-        <div>
+      <div>
+        <div className="cal-page-heading">
           <h1
             style={{
               margin: 0,
               fontFamily: "var(--font-display), serif",
-              fontSize: "1.85rem",
+              fontSize: "1.35rem",
+              letterSpacing: "-0.02em",
+              lineHeight: 1.1,
             }}
           >
             Calendar
           </h1>
-          <p style={{ margin: "0.35rem 0 0", color: "var(--ink-muted)" }}>
-            Each day shows your work hours only · tasks stack only when times truly overlap.
-          </p>
+          <div className="cal-toolbar">
+            <button
+              className="btn secondary cal-toolbar-btn"
+              title="Horizontal"
+              aria-label="Horizontal"
+              style={
+                view === "horizontal"
+                  ? { background: "color-mix(in srgb, var(--brand) 14%, transparent)" }
+                  : undefined
+              }
+              onClick={() => setView("horizontal")}
+            >
+              <GalleryHorizontal size={16} />
+              <span className="cal-toolbar-label">Horizontal</span>
+            </button>
+            <button
+              className="btn secondary cal-toolbar-btn"
+              title="Vertical"
+              aria-label="Vertical"
+              style={
+                view === "vertical"
+                  ? { background: "color-mix(in srgb, var(--brand) 14%, transparent)" }
+                  : undefined
+              }
+              onClick={() => setView("vertical")}
+            >
+              <GalleryVertical size={16} />
+              <span className="cal-toolbar-label">Vertical</span>
+            </button>
+            <button
+              className="btn secondary cal-toolbar-btn"
+              title={scheduling ? "Syncing…" : "Sync & pack"}
+              aria-label={scheduling ? "Syncing" : "Sync and pack"}
+              onClick={() => void reschedule()}
+              disabled={scheduling}
+            >
+              <RefreshCw size={16} />
+              <span className="cal-toolbar-label">{scheduling ? "Syncing…" : "Sync & pack"}</span>
+            </button>
+          </div>
         </div>
-        <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
-          <button
-            className="btn secondary"
-            style={
-              view === "horizontal"
-                ? { background: "color-mix(in srgb, var(--brand) 14%, transparent)" }
-                : undefined
-            }
-            onClick={() => setView("horizontal")}
-          >
-            Horizontal
-          </button>
-          <button
-            className="btn secondary"
-            style={
-              view === "vertical"
-                ? { background: "color-mix(in srgb, var(--brand) 14%, transparent)" }
-                : undefined
-            }
-            onClick={() => setView("vertical")}
-          >
-            Vertical
-          </button>
-          <button className="btn secondary" onClick={reschedule} disabled={scheduling}>
-            <RefreshCw size={16} /> {scheduling ? "Syncing…" : "Sync & pack"}
-          </button>
-        </div>
+        <p style={{ margin: "0.35rem 0 0", color: "var(--ink-muted)", fontSize: "0.9rem" }}>
+          Work hours only · tasks stack when times overlap.
+        </p>
       </div>
 
       {data && !data.outlookConnected && (

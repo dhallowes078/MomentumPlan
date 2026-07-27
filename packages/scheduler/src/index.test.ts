@@ -50,6 +50,34 @@ describe("packSchedule", () => {
     assert.ok(high.start.getTime() <= low.start.getTime());
   });
 
+  it("leaves a buffer gap after each packed task", () => {
+    const now = new Date(2026, 6, 27, 9, 0);
+    const tasks: SchedulableTask[] = [
+      {
+        id: "a",
+        priority: 5,
+        estimateMinutes: 60,
+        dueAt: null,
+        locked: false,
+        createdAt: now,
+      },
+      {
+        id: "b",
+        priority: 4,
+        estimateMinutes: 60,
+        dueAt: null,
+        locked: false,
+        createdAt: now,
+      },
+    ];
+    const result = packSchedule(tasks, [], now, { ...DEFAULT_PREFS, bufferMinutes: 15 });
+    const a = result.placements.find((p) => p.taskId === "a");
+    const b = result.placements.find((p) => p.taskId === "b");
+    assert.ok(a && b);
+    const gapMs = b.start.getTime() - a.end.getTime();
+    assert.ok(gapMs >= 15 * 60_000, `expected >=15m gap, got ${gapMs / 60_000}m`);
+  });
+
   it("marks at-risk when placement is after due date", () => {
     const now = new Date(2026, 6, 27, 9, 0);
     const tasks: SchedulableTask[] = [

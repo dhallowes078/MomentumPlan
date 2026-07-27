@@ -5,12 +5,18 @@ import { signIn, signOut } from "next-auth/react";
 import { Check, Copy, FlaskConical, RefreshCw, Trash2 } from "lucide-react";
 import { THEME_PRESETS } from "@/lib/theme";
 import { useThemePrefs } from "@/components/ThemeProvider";
-import { putPrefs as putLocalPrefs } from "@/lib/local/repo";
+import {
+  countLocalTestTasks,
+  disableLocalTestMode,
+  enableLocalTestMode,
+  putPrefs as putLocalPrefs,
+} from "@/lib/local/repo";
 import {
   requestNotificationPermission,
   rescheduleTaskNotifications,
 } from "@/lib/local/notifications";
 import { flushOutbox } from "@/lib/local/sync";
+import Link from "next/link";
 
 type Prefs = {
   workDays: number[];
@@ -117,6 +123,7 @@ export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<string>("profile");
   const [testMode, setTestMode] = useState({ active: false, count: 0 });
   const [testModeBusy, setTestModeBusy] = useState(false);
+  const [testModeError, setTestModeError] = useState<string | null>(null);
   const initialWs = useRef(false);
 
   const loadWorkspaceDetail = useCallback(async (wid: string) => {
@@ -216,14 +223,23 @@ export default function SettingsPage() {
   useEffect(() => {
     if (!activeWs || !initialWs.current) return;
     void loadWorkspaceDetail(activeWs);
-    void fetch(`/api/test-mode?workspaceId=${encodeURIComponent(activeWs)}`)
-      .then((r) => r.json())
-      .then((data) =>
-        setTestMode({
-          active: Boolean(data.active),
-          count: Number(data.count ?? 0),
-        })
-      );
+    void (async () => {
+      try {
+        const res = await fetch(`/api/test-mode?workspaceId=${encodeURIComponent(activeWs)}`);
+        if (res.ok) {
+          const data = await res.json();
+          setTestMode({
+            active: Boolean(data.active),
+            count: Number(data.count ?? 0),
+          });
+          return;
+        }
+      } catch {
+        /* offline */
+      }
+      const count = await countLocalTestTasks(activeWs);
+      setTestMode({ active: count > 0, count });
+    })();
   }, [activeWs, loadWorkspaceDetail]);
 
   useEffect(() => {
@@ -279,6 +295,12 @@ export default function SettingsPage() {
       quietHoursEnd: payload.quietHoursEnd ?? null,
     });
     await flushOutbox();
+    try {
+      const { runLocalScheduler } = await import("@/lib/local/scheduler");
+      await runLocalScheduler();
+    } catch {
+      /* packing optional if scheduler fails */
+    }
     await rescheduleTaskNotifications();
     setSaved(true);
     setTimeout(() => setSaved(false), 1500);
@@ -372,15 +394,47 @@ export default function SettingsPage() {
   async function enableTestMode() {
     if (!activeWs || testModeBusy) return;
     setTestModeBusy(true);
-    const res = await fetch("/api/test-mode", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ workspaceId: activeWs }),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      setTestMode({ active: true, count: Number(data.count ?? 0) });
-      await loadWorkspaceDetail(activeWs);
+    setTestModeError(null);
+    try {
+      const res = await fetch("/api/test-mode", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspaceId: activeWs }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setTestMode({ active: true, count: Number(data.count ?? 0) });
+        await loadWorkspaceDetail(activeWs);
+        await flushOutbox().catch(() => undefined);
+        setTestModeBusy(false);
+        return;
+      }
+    } catch {
+      /* fall through to local */
+    }
+    try {
+      const data = await enableLocalTestMode(activeWs);
+      setTestMode({ active: true, count: data.count });
+      const local = await import("@/lib/local/repo").then((m) => m.listWorkspaces());
+      const ws = local.find((w) => w.id === activeWs);
+      if (ws) {
+        setWorkspaces((prev) => {
+          const mapped = {
+            id: ws.id,
+            name: ws.name,
+            role: ws.role ?? "OWNER",
+            buckets: ws.buckets,
+            members: ws.members.map((u) => ({ user: u, role: "MEMBER" })),
+          };
+          if (prev.some((p) => p.id === ws.id)) {
+            return prev.map((p) => (p.id === ws.id ? { ...p, ...mapped } : p));
+          }
+          return [...prev, mapped];
+        });
+      }
+      await flushOutbox().catch(() => undefined);
+    } catch (e) {
+      setTestModeError(e instanceof Error ? e.message : "Could not enable Test Mode");
     }
     setTestModeBusy(false);
   }
@@ -389,14 +443,41 @@ export default function SettingsPage() {
     if (!activeWs || testModeBusy) return;
     if (!confirm("Remove all tasks and buckets created by Test Mode?")) return;
     setTestModeBusy(true);
-    const res = await fetch("/api/test-mode", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ workspaceId: activeWs }),
-    });
-    if (res.ok) {
+    setTestModeError(null);
+    try {
+      // Best-effort server cleanup when linked.
+      await fetch("/api/test-mode", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspaceId: activeWs }),
+      }).catch(() => undefined);
+
+      // Always clear on-device Dexie copy (API success alone left local data behind).
+      const result = await disableLocalTestMode(activeWs);
       setTestMode({ active: false, count: 0 });
-      await loadWorkspaceDetail(activeWs);
+
+      const local = await import("@/lib/local/repo").then((m) => m.listWorkspaces());
+      setWorkspaces((prev) =>
+        prev.map((p) => {
+          const ws = local.find((w) => w.id === p.id);
+          if (!ws) return p;
+          return {
+            ...p,
+            buckets: ws.buckets,
+            members: ws.members.map((u) => ({ user: u, role: "MEMBER" as const })),
+          };
+        })
+      );
+
+      if (result.removed === 0) {
+        // Also sweep any leftover marker tasks from other workspace ids.
+        const sweep = await disableLocalTestMode();
+        if (sweep.removed === 0) {
+          setTestModeError("No local test tasks found to remove.");
+        }
+      }
+    } catch (e) {
+      setTestModeError(e instanceof Error ? e.message : "Could not disable Test Mode");
     }
     setTestModeBusy(false);
   }
@@ -841,7 +922,28 @@ export default function SettingsPage() {
                   onChange={(e) => setPrefs({ ...prefs, minChunkMinutes: Number(e.target.value) })}
                 />
               </label>
+              <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
+                Buffer after tasks (min)
+                <input
+                  className="field"
+                  type="number"
+                  min={0}
+                  max={60}
+                  step={5}
+                  value={prefs.bufferMinutes}
+                  onChange={(e) =>
+                    setPrefs({
+                      ...prefs,
+                      bufferMinutes: Math.max(0, Math.min(60, Number(e.target.value) || 0)),
+                    })
+                  }
+                />
+              </label>
             </div>
+            <p style={{ margin: 0, color: "var(--ink-muted)", fontSize: "0.85rem" }}>
+              Buffer leaves a gap after each scheduled block (and around meetings) so tasks don’t
+              stack edge-to-edge. Set to 0 for no gap.
+            </p>
             <button className="btn" type="submit">
               {saved ? "Saved" : "Save preferences"}
             </button>
@@ -1122,9 +1224,9 @@ export default function SettingsPage() {
             </button>
           ) : (
             <>
-              <a className="btn" href="/tasks">
+              <Link className="btn" href="/tasks">
                 View test tasks
-              </a>
+              </Link>
               <button
                 className="btn secondary"
                 type="button"
@@ -1137,6 +1239,14 @@ export default function SettingsPage() {
             </>
           )}
         </div>
+        {testModeError && (
+          <p style={{ margin: 0, color: "var(--danger)", fontSize: "0.85rem" }}>{testModeError}</p>
+        )}
+        {!activeWs && (
+          <p style={{ margin: 0, color: "var(--ink-muted)", fontSize: "0.85rem" }}>
+            Select a workspace first to use Test Mode.
+          </p>
+        )}
       </section>
 
       <section id="settings-phone" className="card settings-section" style={{ padding: "1rem" }}>

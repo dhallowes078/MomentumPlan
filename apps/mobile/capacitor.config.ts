@@ -15,8 +15,12 @@ const config: CapacitorConfig = {
       iconColor: "#1f4d3a",
     },
     StatusBar: {
-      overlaysWebView: false,
+      // Ignored on Android 15+ (edge-to-edge enforced); CSS safe-area handles insets.
+      overlaysWebView: true,
       style: "LIGHT",
+    },
+    SystemBars: {
+      insetsHandling: "css",
     },
   },
   android: {

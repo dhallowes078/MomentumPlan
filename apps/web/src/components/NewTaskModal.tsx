@@ -11,7 +11,7 @@ import { DueDatePicker } from "@/components/DueDatePicker";
 import { AssigneeSelect } from "@/components/AssigneeSelect";
 import { FileButton } from "@/components/FileButton";
 import { EmojiPicker } from "@/components/EmojiPicker";
-import { createLocalTask } from "@/lib/local/repo";
+import { createLocalTask, listWorkspaces } from "@/lib/local/repo";
 import { flushOutbox, pullFromServer } from "@/lib/local/sync";
 
 type Member = {
@@ -56,6 +56,7 @@ export function NewTaskModal({
   const [bucketId, setBucketId] = useState("");
   const [dueAt, setDueAt] = useState("");
   const [assigneeId, setAssigneeId] = useState("");
+  const [meId, setMeId] = useState("");
   const [mentionIds, setMentionIds] = useState<string[]>([]);
   const [checklist, setChecklist] = useState<ChecklistDraft[]>([]);
   const [links, setLinks] = useState<LinkDraft[]>([]);
@@ -87,11 +88,38 @@ export function NewTaskModal({
   useEffect(() => {
     if (!open) return;
     void fetch("/api/workspaces")
-      .then((r) => r.json())
+      .then(async (r) => {
+        if (r.ok) return r.json();
+        const local = await listWorkspaces();
+        return {
+          workspaces: local.map((w) => ({
+            id: w.id,
+            name: w.name,
+            buckets: w.buckets,
+          })),
+        };
+      })
       .then((data) => {
         setWorkspaces(data.workspaces ?? []);
         setWorkspaceId((prev) => prev || data.workspaces?.[0]?.id || "");
+      })
+      .catch(async () => {
+        const local = await listWorkspaces();
+        setWorkspaces(
+          local.map((w) => ({
+            id: w.id,
+            name: w.name,
+            buckets: w.buckets,
+          }))
+        );
+        setWorkspaceId((prev) => prev || local[0]?.id || "");
       });
+    void fetch("/api/me")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data?.user?.id) setMeId(data.user.id);
+      })
+      .catch(() => undefined);
   }, [open]);
 
   useEffect(() => {
@@ -105,16 +133,48 @@ export function NewTaskModal({
       return;
     }
     void fetch(`/api/workspaces/${workspaceId}`)
-      .then((r) => r.json())
+      .then(async (r) => {
+        if (r.ok) return r.json();
+        const local = await listWorkspaces();
+        const ws = local.find((w) => w.id === workspaceId);
+        return {
+          workspace: ws
+            ? {
+                members: (ws.members ?? []).map((user) => ({ user })),
+                buckets: ws.buckets,
+              }
+            : null,
+        };
+      })
       .then((data) => {
-        setMembers(
-          (data.workspace?.members ?? []).map((m: { user: Member }) => m.user)
+        const nextMembers: Member[] = (data.workspace?.members ?? []).map(
+          (m: { user: Member }) => m.user
         );
+        if (nextMembers.length === 0 && meId) {
+          nextMembers.push({ id: meId, name: "Me", email: "me@local" });
+        }
+        if (nextMembers.length === 0) {
+          nextMembers.push({ id: "local-me", name: "Me", email: "me@local", color: "#3D6B4F" });
+        }
+        setMembers(nextMembers);
+        const preferred = meId && nextMembers.some((m) => m.id === meId) ? meId : nextMembers[0]?.id;
+        setAssigneeId((prev) => (prev && nextMembers.some((m) => m.id === prev) ? prev : preferred || ""));
+      })
+      .catch(async () => {
+        const local = await listWorkspaces();
+        const ws = local.find((w) => w.id === workspaceId);
+        const nextMembers: Member[] =
+          ws?.members?.length
+            ? ws.members
+            : [{ id: meId || "local-me", name: "Me", email: "me@local", color: "#3D6B4F" }];
+        setMembers(nextMembers);
+        setAssigneeId((prev) => prev || nextMembers[0]?.id || "");
       });
     void fetch(`/api/templates?workspaceId=${workspaceId}`)
-      .then((r) => r.json())
-      .then((data) => setTemplates(data.templates ?? []));
-  }, [workspaceId]);
+      .then((r) => (r.ok ? r.json() : { templates: [] }))
+      .then((data) => setTemplates(data.templates ?? []))
+      .catch(() => setTemplates([]));
+  }, [workspaceId, meId]);
 
   useEffect(() => {
     if (!headerFile) {
@@ -148,7 +208,7 @@ export function NewTaskModal({
     setEstimate(theme.smallMinutes);
     setBucketId("");
     setDueAt("");
-    setAssigneeId("");
+    setAssigneeId(meId || members[0]?.id || "");
     setMentionIds([]);
     setChecklist([]);
     setLinks([]);
@@ -193,7 +253,7 @@ export function NewTaskModal({
       priority,
       estimateMinutes: Math.max(5, estimate),
       bucketId: bucketId || null,
-      assigneeId: mode === "full" && assigneeId ? assigneeId : null,
+      assigneeId: assigneeId || meId || null,
       dueAt: dueAt ? new Date(`${dueAt}T17:00:00`).toISOString() : null,
       links: mode === "full" && links.length ? links : undefined,
       isRecurring: mode === "full" ? isRecurring : false,
@@ -400,6 +460,7 @@ export function NewTaskModal({
                   members={members}
                   value={assigneeId}
                   onChange={setAssigneeId}
+                  meId={meId || members[0]?.id}
                 />
               </label>
             )}
@@ -447,7 +508,6 @@ export function NewTaskModal({
                   onChange={(e) => {
                     setWorkspaceId(e.target.value);
                     setBucketId("");
-                    setAssigneeId("");
                     setMentionIds([]);
                   }}
                 >
