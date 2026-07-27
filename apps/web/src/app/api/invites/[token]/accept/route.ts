@@ -20,23 +20,21 @@ export async function POST(
     return jsonError("Sign in with the invited email address", 403);
   }
 
-  await prisma.$transaction([
-    prisma.workspaceMember.upsert({
-      where: {
-        workspaceId_userId: { workspaceId: invite.workspaceId, userId },
-      },
-      create: {
-        workspaceId: invite.workspaceId,
-        userId,
-        role: invite.role,
-      },
-      update: { role: invite.role },
-    }),
-    prisma.workspaceInvite.update({
-      where: { id: invite.id },
-      data: { acceptedAt: new Date() },
-    }),
-  ]);
+  await prisma.workspaceMember.upsert({
+    where: {
+      workspaceId_userId: { workspaceId: invite.workspaceId, userId },
+    },
+    create: {
+      workspaceId: invite.workspaceId,
+      userId,
+      role: invite.role,
+    },
+    update: { role: invite.role },
+  });
+  await prisma.workspaceInvite.update({
+    where: { id: invite.id },
+    data: { acceptedAt: new Date() },
+  });
 
   return NextResponse.json({ ok: true, workspaceId: invite.workspaceId });
 }

@@ -9,7 +9,11 @@ const nextConfig: NextConfig = {
     "@capacitor/network",
     "@capacitor/preferences",
   ],
-  serverExternalPackages: ["@prisma/client", ".prisma/client"],
+  serverExternalPackages: [
+    "@prisma/client",
+    ".prisma/client",
+    "@prisma/adapter-d1",
+  ],
   experimental: {
     serverActions: {
       bodySizeLimit: "10mb",

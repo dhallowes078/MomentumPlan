@@ -34,27 +34,25 @@ export async function PUT(
   const parsed = schema.safeParse(await req.json());
   if (!parsed.success) return jsonError(parsed.error.message);
 
-  await prisma.$transaction([
-    prisma.checklistItem.deleteMany({ where: { taskId: id } }),
-    prisma.checklistItem.createMany({
-      data: parsed.data.items.map((item, index) => ({
-        taskId: id,
-        text: item.text,
-        done: item.done ?? false,
-        position: item.position ?? index,
-      })),
-    }),
-    prisma.taskEvent.create({
-      data: {
-        taskId: id,
-        actorId: userId,
-        type: "CHECKLIST_UPDATED",
-        payload: {
-          summary: `${parsed.data.items.length} items · ${parsed.data.items.filter((i) => i.done).length} done`,
-        },
+  await prisma.checklistItem.deleteMany({ where: { taskId: id } });
+  await prisma.checklistItem.createMany({
+    data: parsed.data.items.map((item, index) => ({
+      taskId: id,
+      text: item.text,
+      done: item.done ?? false,
+      position: item.position ?? index,
+    })),
+  });
+  await prisma.taskEvent.create({
+    data: {
+      taskId: id,
+      actorId: userId,
+      type: "CHECKLIST_UPDATED",
+      payload: {
+        summary: `${parsed.data.items.length} items · ${parsed.data.items.filter((i) => i.done).length} done`,
       },
-    }),
-  ]);
+    },
+  });
 
   const items = await prisma.checklistItem.findMany({
     where: { taskId: id },

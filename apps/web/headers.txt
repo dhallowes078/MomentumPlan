@@ -1,0 +1,17 @@
+HTTP/1.1 302 Found
+Date: Mon, 27 Jul 2026 22:07:18 GMT
+Transfer-Encoding: chunked
+Connection: keep-alive
+Location: https://momentum.momentum-app.workers.dev/login?error=MissingCSRF
+Access-Control-Allow-Origin: *
+Vary: rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch
+access-control-allow-credentials: true
+access-control-allow-headers: Content-Type, Authorization, X-Requested-With
+access-control-allow-methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
+x-opennext: 1
+Report-To: {"group":"cf-nel","max_age":604800,"endpoints":[{"url":"https://a.nel.cloudflare.com/report/v4?s=FeqaYIeemVvNJHIhHgBew4AX2rAfoM2j3TePATm8cok10KTkkv5YNmpkJfTGSwAc%2BLWZ9tCktunTvvac7YZWCNttJpWgwA64yRw5PyWluLOEFiZMX02Q1s45jtgxA7B5TeKQALkj2R5NZAWJIKVyqqX3vuw%3D"}]}
+Nel: {"report_to":"cf-nel","success_fraction":0.0,"max_age":604800}
+Server: cloudflare
+CF-RAY: a21ef4cb3c81db2b-MAN
+alt-svc: h3=":443"; ma=86400
+

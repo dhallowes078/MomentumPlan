@@ -62,6 +62,7 @@ export const authConfig = {
       const isPublic =
         path.startsWith("/login") ||
         path.startsWith("/api/auth") ||
+        path.startsWith("/api/health") ||
         path.startsWith("/manifest") ||
         path.startsWith("/icon") ||
         path.startsWith("/sw.js") ||

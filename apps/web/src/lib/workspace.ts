@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import type { PrismaClient } from "@prisma/client";
 
 function slugify(name: string): string {
   return (
@@ -10,8 +11,12 @@ function slugify(name: string): string {
   );
 }
 
-export async function ensurePersonalWorkspace(userId: string, name: string) {
-  const existing = await prisma.workspaceMember.findFirst({
+export async function ensurePersonalWorkspace(
+  userId: string,
+  name: string,
+  db: PrismaClient = prisma
+) {
+  const existing = await db.workspaceMember.findFirst({
     where: { userId, role: "OWNER" },
     include: { workspace: true },
   });
@@ -20,28 +25,34 @@ export async function ensurePersonalWorkspace(userId: string, name: string) {
   const base = slugify(`${name}-personal`);
   let slug = base;
   let n = 1;
-  while (await prisma.workspace.findUnique({ where: { slug } })) {
+  while (await db.workspace.findUnique({ where: { slug } })) {
     slug = `${base}-${n++}`;
   }
 
-  const workspace = await prisma.workspace.create({
+  // Sequential writes — D1 does not support Prisma nested writes / transactions.
+  const workspace = await db.workspace.create({
     data: {
       name: `${name.split(" ")[0]}'s Workspace`,
       slug,
-      members: {
-        create: { userId, role: "OWNER" },
-      },
-      buckets: {
-        create: [
-          { name: "Inbox", color: "#3D6B4F", position: 0 },
-          { name: "Work", color: "#2F5D8C", position: 1 },
-          { name: "Personal", color: "#8B5E3C", position: 2 },
-        ],
-      },
     },
   });
 
-  await prisma.schedulePrefs.upsert({
+  await db.workspaceMember.create({
+    data: { workspaceId: workspace.id, userId, role: "OWNER" },
+  });
+
+  const buckets = [
+    { name: "Inbox", color: "#3D6B4F", position: 0 },
+    { name: "Work", color: "#2F5D8C", position: 1 },
+    { name: "Personal", color: "#8B5E3C", position: 2 },
+  ];
+  for (const bucket of buckets) {
+    await db.bucket.create({
+      data: { workspaceId: workspace.id, ...bucket },
+    });
+  }
+
+  await db.schedulePrefs.upsert({
     where: { userId },
     create: { userId },
     update: {},
