@@ -15,7 +15,9 @@
     "lint": "npm run lint -w @momentum/web",
     "tunnel": "npx --yes cloudflared tunnel --url http://localhost:3000",
     "mobile:sync": "npm run sync -w @momentum/mobile",
-    "mobile:open": "npm run open -w @momentum/mobile"
+    "mobile:open": "npm run open -w @momentum/mobile",
+    "mobile:build": "npm run build -w @momentum/mobile",
+    "mobile:apk": "npm run apk -w @momentum/mobile"
   },
   "engines": {
     "node": ">=20"

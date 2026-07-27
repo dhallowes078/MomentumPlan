@@ -1,6 +1,7 @@
 import { startOfDay, endOfDay } from "date-fns";
 import { localDb, setMeta, type LocalTask, type LocalWorkspace } from "./db";
 import * as repo from "./repo";
+import { apiFetch, apiUrl, getDeviceToken, getSyncApiBase } from "@/lib/sync-api";
 
 export type SyncStatus = "idle" | "syncing" | "offline" | "error";
 
@@ -36,9 +37,16 @@ function setStatus(next: SyncStatus, err?: string) {
   emit();
 }
 
-async function safeJson<T>(url: string, init?: RequestInit): Promise<T | null> {
+/** True when we have a remote API base and a device token (native sync mode). */
+export function canSyncRemote() {
+  // Same-origin web app can sync with cookie session without a stored token.
+  if (!getSyncApiBase()) return true;
+  return Boolean(getDeviceToken());
+}
+
+async function safeJson<T>(path: string, init?: RequestInit): Promise<T | null> {
   try {
-    const res = await fetch(url, init);
+    const res = await apiFetch(path, init);
     if (!res.ok) return null;
     return (await res.json()) as T;
   } catch {
@@ -80,6 +88,11 @@ function normalizeTask(t: Record<string, unknown>): LocalTask {
 export async function pullFromServer() {
   if (typeof navigator !== "undefined" && !navigator.onLine) {
     setStatus("offline");
+    return;
+  }
+  if (getSyncApiBase() && !getDeviceToken()) {
+    // Native offline / not linked yet — stay local-only.
+    setStatus("idle");
     return;
   }
   setStatus("syncing");
@@ -168,7 +181,9 @@ export async function pullFromServer() {
     );
     await localDb.backlog.clear();
     if (today.backlog?.length) {
-      await localDb.backlog.bulkPut(today.backlog.map((t) => normalizeTask(t as unknown as Record<string, unknown>)));
+      await localDb.backlog.bulkPut(
+        today.backlog.map((t) => normalizeTask(t as unknown as Record<string, unknown>))
+      );
     }
   }
 
@@ -254,6 +269,10 @@ export async function flushOutbox() {
     setStatus("offline");
     return;
   }
+  if (getSyncApiBase() && !getDeviceToken()) {
+    setStatus("idle");
+    return;
+  }
   flushing = true;
   setStatus("syncing");
   try {
@@ -262,9 +281,8 @@ export async function flushOutbox() {
       try {
         const op = item.op;
         if (op.type === "createTask") {
-          const res = await fetch("/api/tasks", {
+          const res = await apiFetch("/api/tasks", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
             body: JSON.stringify(op.body),
           });
           if (!res.ok) throw new Error(`create ${res.status}`);
@@ -281,50 +299,44 @@ export async function flushOutbox() {
               });
             }
             if (op.checklist?.length) {
-              await fetch(`/api/tasks/${serverId}/checklist`, {
+              await apiFetch(`/api/tasks/${serverId}/checklist`, {
                 method: "PUT",
-                headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ items: op.checklist }),
               });
             }
             if (op.mentionIds?.length) {
-              await fetch(`/api/tasks/${serverId}`, {
+              await apiFetch(`/api/tasks/${serverId}`, {
                 method: "PATCH",
-                headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ mentionIds: op.mentionIds }),
               });
             }
           }
         } else if (op.type === "patchTask") {
-          const res = await fetch(`/api/tasks/${op.taskId}`, {
+          const res = await apiFetch(`/api/tasks/${op.taskId}`, {
             method: "PATCH",
-            headers: { "Content-Type": "application/json" },
             body: JSON.stringify(op.body),
           });
           if (!res.ok) throw new Error(`patch ${res.status}`);
         } else if (op.type === "putChecklist") {
-          const res = await fetch(`/api/tasks/${op.taskId}/checklist`, {
+          const res = await apiFetch(`/api/tasks/${op.taskId}/checklist`, {
             method: "PUT",
-            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ items: op.items }),
           });
           if (!res.ok) throw new Error(`checklist ${res.status}`);
         } else if (op.type === "reorder") {
-          const res = await fetch("/api/tasks/reorder", {
+          const res = await apiFetch("/api/tasks/reorder", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ orderedTaskIds: op.orderedTaskIds }),
+            body: JSON.stringify({ updates: op.orderedTaskIds.map((id, position) => ({ id, position })) }),
           });
           if (!res.ok) throw new Error(`reorder ${res.status}`);
         } else if (op.type === "patchPrefs") {
-          const res = await fetch("/api/prefs", {
+          const res = await apiFetch("/api/prefs", {
             method: "PATCH",
-            headers: { "Content-Type": "application/json" },
             body: JSON.stringify(op.body),
           });
           if (!res.ok) throw new Error(`prefs ${res.status}`);
         } else if (op.type === "runScheduler") {
-          await fetch("/api/schedule/run", { method: "POST" });
+          await apiFetch("/api/schedule/run", { method: "POST" });
         }
         await localDb.outbox.delete(item.id);
       } catch (e) {
@@ -352,13 +364,18 @@ export async function bootLocalSync() {
   try {
     emit();
     const db = (await import("./db")).getLocalDb();
+    await repo.ensureOfflineWorkspace();
     const hasData = (await db.tasks.count()) > 0 || (await db.workspaces.count()) > 0;
-    if (!hasData) {
-      await pullFromServer();
+    if (canSyncRemote()) {
+      if (!hasData) {
+        await pullFromServer();
+      } else {
+        void pullFromServer().then(() => flushOutbox());
+      }
+      await flushOutbox();
     } else {
-      void pullFromServer().then(() => flushOutbox());
+      setStatus("idle");
     }
-    await flushOutbox();
   } catch (e) {
     console.error("bootLocalSync failed", e);
     setStatus("error", e instanceof Error ? e.message : "boot failed");
@@ -369,3 +386,6 @@ export function todayWindow() {
   const now = new Date();
   return { from: startOfDay(now), to: endOfDay(now) };
 }
+
+// silence unused in some builds
+void apiUrl;

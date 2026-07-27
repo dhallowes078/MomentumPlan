@@ -1,16 +1,12 @@
 import type { CapacitorConfig } from "@capacitor/cli";
 
-// Physical device: phone must reach this URL on your LAN (or a Cloudflare tunnel).
-// Emulator: use http://10.0.2.2:3000
-const serverUrl =
-  process.env.MOMENTUM_SERVER_URL || "http://192.168.4.164:3000";
-
 const config: CapacitorConfig = {
   appId: "app.momentum.plan",
   appName: "Momentum",
   webDir: "www",
+  // No server.url — the APK loads the bundled SPA from www/.
   server: {
-    url: serverUrl,
+    androidScheme: "https",
     cleartext: true,
   },
   plugins: {

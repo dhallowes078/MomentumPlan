@@ -58,6 +58,7 @@ export const authConfig = {
   callbacks: {
     authorized({ auth, request }) {
       const path = request.nextUrl.pathname;
+      const bearer = request.headers.get("authorization")?.toLowerCase().startsWith("bearer ");
       const isPublic =
         path.startsWith("/login") ||
         path.startsWith("/api/auth") ||
@@ -65,7 +66,8 @@ export const authConfig = {
         path.startsWith("/icon") ||
         path.startsWith("/sw.js") ||
         path.startsWith("/invite") ||
-        path === "/";
+        path === "/" ||
+        (path.startsWith("/api/") && Boolean(bearer));
       if (isPublic) return true;
       return !!auth?.user;
     },

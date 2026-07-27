@@ -216,3 +216,19 @@ export async function replaceMeetings(
 export async function outboxCount() {
   return localDb.outbox.count();
 }
+
+/** Seed a local-only workspace when the device has never synced. */
+export async function ensureOfflineWorkspace(): Promise<LocalWorkspace> {
+  const existing = await localDb.workspaces.toArray();
+  if (existing[0]) return existing[0];
+  const ws: LocalWorkspace = {
+    id: "local-workspace",
+    name: "My plan",
+    buckets: [
+      { id: "local-bucket-general", name: "General", color: "#3D6B4F", workspaceId: "local-workspace" },
+    ],
+    members: [],
+  };
+  await localDb.workspaces.put(ws);
+  return ws;
+}
