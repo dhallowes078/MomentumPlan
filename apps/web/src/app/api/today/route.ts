@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/api";
 import { prisma } from "@/lib/db";
 import { startOfDay, endOfDay } from "date-fns";
-import { runSchedulerForUser } from "@/lib/scheduler-service";
 
 export async function GET() {
   const { userId, error } = await requireUser();
@@ -12,20 +11,8 @@ export async function GET() {
   const from = startOfDay(now);
   const to = endOfDay(now);
 
-  // Don't block the Today read on a full reschedule — kick it off in the background.
-  void prisma.scheduleBlock
-    .count({
-      where: {
-        userId,
-        end: { lt: now },
-        completed: false,
-        task: { status: { in: ["TODO", "IN_PROGRESS"] } },
-      },
-    })
-    .then((stale) => {
-      if (stale > 0) return runSchedulerForUser(userId);
-    })
-    .catch(console.error);
+  // Do not run the packer on every Today fetch — it is CPU-heavy on Workers (Error 1102).
+  // Reschedule via /api/schedule/run or the calendar Sync button instead.
 
   const blocks = await prisma.scheduleBlock.findMany({
     where: { userId, start: { lt: to }, end: { gt: from } },

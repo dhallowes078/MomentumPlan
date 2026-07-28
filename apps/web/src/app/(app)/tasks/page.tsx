@@ -5,10 +5,12 @@ import Link from "next/link";
 import { ArrowDownWideNarrow, Folders, GripVertical, Plus, RotateCcw } from "lucide-react";
 import { formatMinutes, priorityColor } from "@/lib/format";
 import { NewTaskModal } from "@/components/NewTaskModal";
+import { CreateChooser } from "@/components/CreateChooser";
 import { useLocalTasks, useLocalWorkspaces } from "@/lib/local/hooks";
 import * as repo from "@/lib/local/repo";
 import type { LocalTask } from "@/lib/local/db";
 import { flushOutbox, pullFromServer } from "@/lib/local/sync";
+import { resolveMediaUrl } from "@/lib/sync-api";
 
 type SortMode = "manual" | "priority" | "bucket";
 
@@ -22,7 +24,9 @@ export default function TasksPage() {
   const [tab, setTab] = useState<"open" | "completed">("open");
   const [sortMode, setSortMode] = useState<SortMode>("manual");
   const [createOpen, setCreateOpen] = useState(false);
+  const [chooserOpen, setChooserOpen] = useState(false);
   const [createMode, setCreateMode] = useState<"simple" | "full">("simple");
+  const [createVariant, setCreateVariant] = useState<"task" | "event">("task");
   const [ordered, setOrdered] = useState<LocalTask[]>([]);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [overIndex, setOverIndex] = useState<number | null>(null);
@@ -225,10 +229,7 @@ export default function TasksPage() {
           </button>
           <button
             className="btn"
-            onClick={() => {
-              setCreateMode("simple");
-              setCreateOpen(true);
-            }}
+            onClick={() => setChooserOpen(true)}
           >
             <Plus size={16} /> New
           </button>
@@ -318,12 +319,16 @@ export default function TasksPage() {
         {list.length === 0 ? (
           <p style={{ color: "var(--ink-muted)" }}>No tasks match these filters.</p>
         ) : (
-          list.map((t, i) => (
+          list.map((t, i) => {
+            const fadeColor = t.bucket?.color ?? priorityColor(t.priority);
+            const mediaSrc = t.headerImageUrl ? resolveMediaUrl(t.headerImageUrl) : null;
+            return (
             <div
               key={t.id}
-              className={`card ${
+              className={`card task-fade-card ${
                 dragIndex === i ? "drag-ghost" : overIndex === i && dragIndex != null ? "dragging-item" : ""
               }`}
+              data-has-header={mediaSrc ? "true" : undefined}
               onDragOver={
                 canReorder
                   ? (e) => {
@@ -332,21 +337,19 @@ export default function TasksPage() {
                     }
                   : undefined
               }
-              style={{
-                padding: "0.85rem 1rem",
-                display: "grid",
-                gridTemplateColumns: canReorder
-                  ? t.headerImageUrl
-                    ? "28px 72px 1fr auto"
-                    : "28px 1fr auto"
-                  : t.headerImageUrl
-                    ? "72px 1fr auto"
-                    : "1fr auto",
-                gap: "0.75rem",
-                alignItems: "center",
-                borderLeft: t.bucket ? `4px solid ${t.bucket.color}` : undefined,
-                transition: "transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease",
-              }}
+              style={
+                {
+                  padding: "0.85rem 1rem",
+                  display: "grid",
+                  gridTemplateColumns: canReorder ? "28px 1fr auto" : "1fr auto",
+                  gap: "0.75rem",
+                  alignItems: "center",
+                  borderLeft: t.bucket ? `4px solid ${t.bucket.color}` : undefined,
+                  transition: "transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease",
+                  ["--fade-color" as string]: fadeColor,
+                  ["--fade-image" as string]: mediaSrc ? `url("${mediaSrc}")` : undefined,
+                } as React.CSSProperties
+              }
             >
               {canReorder ? (
                 <span
@@ -368,14 +371,6 @@ export default function TasksPage() {
                   <GripVertical size={16} color="var(--ink-muted)" />
                 </span>
               ) : null}
-              {t.headerImageUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={t.headerImageUrl}
-                  alt=""
-                  style={{ width: 72, height: 52, objectFit: "cover", borderRadius: 8 }}
-                />
-              ) : null}
               <Link href={`/tasks/${t.id}`} style={{ minWidth: 0 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "0.45rem" }}>
                   <span className="priority-dot" style={{ background: priorityColor(t.priority) }} />
@@ -396,13 +391,29 @@ export default function TasksPage() {
                 </button>
               ) : null}
             </div>
-          ))
+            );
+          })
         )}
       </div>
 
+      <CreateChooser
+        open={chooserOpen}
+        onClose={() => setChooserOpen(false)}
+        onPickTask={() => {
+          setCreateVariant("task");
+          setCreateMode("simple");
+          setCreateOpen(true);
+        }}
+        onPickEvent={() => {
+          setCreateVariant("event");
+          setCreateMode("full");
+          setCreateOpen(true);
+        }}
+      />
       <NewTaskModal
         open={createOpen}
         initialMode={createMode}
+        variant={createVariant}
         onClose={() => {
           setCreateOpen(false);
           void pullFromServer();

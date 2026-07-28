@@ -99,6 +99,24 @@ export async function pullFromServer() {
 
   const wsPayload = await safeJson<{ workspaces: LocalWorkspace[] }>("/api/workspaces");
   if (!wsPayload?.workspaces?.length) {
+    // Distinguish "empty account" from auth/network failure when a device token is set.
+    if (getDeviceToken()) {
+      try {
+        const res = await apiFetch("/api/workspaces");
+        if (res.status === 401 || res.status === 403) {
+          setStatus("error", "Device code expired or invalid — re-link in Settings");
+          return;
+        }
+        if (!res.ok) {
+          setStatus("error", `Could not load workspaces (${res.status})`);
+          return;
+        }
+        // Empty list is a valid new account.
+      } catch {
+        setStatus("error", "Could not reach sync server");
+        return;
+      }
+    }
     setStatus(navigator.onLine ? "idle" : "offline");
     return;
   }

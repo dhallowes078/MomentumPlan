@@ -31,20 +31,32 @@ type Workspace = {
 type ChecklistDraft = { text: string; done: boolean };
 type LinkDraft = { url: string; title?: string };
 type Mode = "simple" | "full";
+type Variant = "task" | "event";
 
 const SIZE_KEYS = ["tiny", "small", "medium", "big"] as const;
+
+function todayInputValue() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
 
 export function NewTaskModal({
   open,
   onClose,
   initialMode = "full",
+  variant = "task",
 }: {
   open: boolean;
   onClose: () => void;
   initialMode?: Mode;
+  variant?: Variant;
 }) {
   const router = useRouter();
   const theme = useThemePrefs();
+  const isEvent = variant === "event";
   const [mode, setMode] = useState<Mode>(initialMode);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
@@ -55,6 +67,9 @@ export function NewTaskModal({
   const [estimate, setEstimate] = useState(30);
   const [bucketId, setBucketId] = useState("");
   const [dueAt, setDueAt] = useState("");
+  const [eventDate, setEventDate] = useState(todayInputValue);
+  const [eventStart, setEventStart] = useState("09:00");
+  const [eventEnd, setEventEnd] = useState("10:00");
   const [assigneeId, setAssigneeId] = useState("");
   const [meId, setMeId] = useState("");
   const [mentionIds, setMentionIds] = useState<string[]>([]);
@@ -77,13 +92,12 @@ export function NewTaskModal({
   const [portalContainer, setPortalContainer] = useState<HTMLElement | null>(null);
 
   useEffect(() => {
-    setPortalContainer(document.body);
-  }, []);
+    if (open) setMode(isEvent ? "full" : initialMode);
+  }, [open, initialMode, isEvent]);
 
   useEffect(() => {
-    if (!open) return;
-    setMode(initialMode);
-  }, [open, initialMode]);
+    setPortalContainer(document.body);
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -208,6 +222,9 @@ export function NewTaskModal({
     setEstimate(theme.smallMinutes);
     setBucketId("");
     setDueAt("");
+    setEventDate(todayInputValue());
+    setEventStart("09:00");
+    setEventEnd("10:00");
     setAssigneeId(meId || members[0]?.id || "");
     setMentionIds([]);
     setChecklist([]);
@@ -216,6 +233,8 @@ export function NewTaskModal({
     setHeaderFile(null);
     setEmoji(null);
     setDocs([]);
+    setIsRecurring(false);
+    setMode(isEvent ? "full" : initialMode);
   }
 
   async function uploadFile(taskId: string, file: File): Promise<string | null> {
@@ -243,6 +262,22 @@ export function NewTaskModal({
   async function create(e: React.FormEvent) {
     e.preventDefault();
     if (!title.trim() || !workspaceId) return;
+
+    let lockedStart: string | null = null;
+    let lockedEnd: string | null = null;
+    let estimateMinutes = Math.max(5, estimate);
+    if (isEvent) {
+      if (!eventDate || !eventStart || !eventEnd) return;
+      lockedStart = new Date(`${eventDate}T${eventStart}:00`).toISOString();
+      lockedEnd = new Date(`${eventDate}T${eventEnd}:00`).toISOString();
+      if (Number.isNaN(Date.parse(lockedStart)) || Number.isNaN(Date.parse(lockedEnd))) return;
+      if (Date.parse(lockedEnd) <= Date.parse(lockedStart)) return;
+      estimateMinutes = Math.max(
+        5,
+        Math.round((Date.parse(lockedEnd) - Date.parse(lockedStart)) / 60000)
+      );
+    }
+
     setSaving(true);
 
     const local = await createLocalTask({
@@ -251,20 +286,24 @@ export function NewTaskModal({
       notes: mode === "full" && notes.trim() ? notes : null,
       emoji: mode === "full" ? emoji : null,
       priority,
-      estimateMinutes: Math.max(5, estimate),
+      estimateMinutes,
       bucketId: bucketId || null,
       assigneeId: assigneeId || meId || null,
-      dueAt: dueAt ? new Date(`${dueAt}T17:00:00`).toISOString() : null,
+      dueAt: !isEvent && dueAt ? new Date(`${dueAt}T17:00:00`).toISOString() : null,
+      locked: isEvent,
+      allowSplit: isEvent ? false : undefined,
+      scheduledStart: lockedStart,
+      scheduledEnd: lockedEnd,
       links: mode === "full" && links.length ? links : undefined,
-      isRecurring: mode === "full" ? isRecurring : false,
-      recurFreq: mode === "full" && isRecurring ? recurFreq : null,
-      recurInterval: mode === "full" && isRecurring ? recurInterval : 1,
+      isRecurring: !isEvent && mode === "full" ? isRecurring : false,
+      recurFreq: !isEvent && mode === "full" && isRecurring ? recurFreq : null,
+      recurInterval: !isEvent && mode === "full" && isRecurring ? recurInterval : 1,
       recurEndsAt:
-        mode === "full" && isRecurring && recurEndsAt
+        !isEvent && mode === "full" && isRecurring && recurEndsAt
           ? new Date(`${recurEndsAt}T23:59:59`).toISOString()
           : null,
       recurCount:
-        mode === "full" && isRecurring && recurCount ? Number(recurCount) : null,
+        !isEvent && mode === "full" && isRecurring && recurCount ? Number(recurCount) : null,
       checklist: mode === "full" ? checklist.filter((c) => c.text.trim()) : undefined,
       mentionIds: mode === "full" && mentionIds.length ? mentionIds : undefined,
     });
@@ -402,33 +441,37 @@ export function NewTaskModal({
           }}
         >
           <div style={{ display: "flex", justifyContent: "space-between", gap: "0.75rem", alignItems: "center" }}>
-            <h2 style={{ margin: 0, fontSize: "1.15rem" }}>New task</h2>
+            <h2 style={{ margin: 0, fontSize: "1.15rem" }}>{isEvent ? "New event" : "New task"}</h2>
             <div style={{ display: "flex", gap: "0.35rem", alignItems: "center" }}>
-              <button
-                type="button"
-                className="btn secondary"
-                style={
-                  mode === "simple"
-                    ? { background: "color-mix(in srgb, var(--brand) 14%, transparent)" }
-                    : undefined
-                }
-                onClick={() => setMode("simple")}
-              >
-                Simple
-              </button>
-              <button
-                type="button"
-                className="btn secondary"
-                style={
-                  mode === "full"
-                    ? { background: "color-mix(in srgb, var(--brand) 14%, transparent)" }
-                    : undefined
-                }
-                onClick={() => setMode("full")}
-              >
-                Full
-              </button>
-              {mode === "simple" && (
+              {!isEvent && (
+                <>
+                  <button
+                    type="button"
+                    className="btn secondary"
+                    style={
+                      mode === "simple"
+                        ? { background: "color-mix(in srgb, var(--brand) 14%, transparent)" }
+                        : undefined
+                    }
+                    onClick={() => setMode("simple")}
+                  >
+                    Simple
+                  </button>
+                  <button
+                    type="button"
+                    className="btn secondary"
+                    style={
+                      mode === "full"
+                        ? { background: "color-mix(in srgb, var(--brand) 14%, transparent)" }
+                        : undefined
+                    }
+                    onClick={() => setMode("full")}
+                  >
+                    Full
+                  </button>
+                </>
+              )}
+              {(mode === "simple" || isEvent) && (
                 <button type="button" className="btn ghost" onClick={onClose} aria-label="Close">
                   <X size={18} />
                 </button>
@@ -438,7 +481,7 @@ export function NewTaskModal({
 
           <input
             className="field"
-            placeholder="What needs doing?"
+            placeholder={isEvent ? "Event title" : "What needs doing?"}
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             autoFocus
@@ -461,55 +504,114 @@ export function NewTaskModal({
             <PriorityButtons value={priority} onChange={setPriority} />
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: mode === "full" ? "1fr 1fr" : "1fr", gap: "0.5rem" }}>
-            <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
-              Due date
-              <DueDatePicker value={dueAt} onChange={setDueAt} />
-            </label>
-            {mode === "full" && (
+          {isEvent ? (
+            <div style={{ display: "grid", gap: "0.5rem" }}>
+              <p style={{ margin: 0, color: "var(--ink-muted)", fontSize: "0.85rem" }}>
+                Events lock a fixed time. Other tasks are packed around them, like a break.
+              </p>
               <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
-                Assignee
-                <AssigneeSelect
-                  members={members}
-                  value={assigneeId}
-                  onChange={setAssigneeId}
-                  meId={meId || members[0]?.id}
+                Date
+                <input
+                  className="field"
+                  type="date"
+                  value={eventDate}
+                  onChange={(e) => setEventDate(e.target.value)}
+                  required
                 />
               </label>
-            )}
-          </div>
-
-          <div>
-            <div style={{ fontSize: "0.85rem", marginBottom: "0.35rem" }}>Task length</div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem", marginBottom: "0.5rem" }}>
-              {SIZE_KEYS.map((key) => (
-                <button
-                  key={key}
-                  type="button"
-                  className="btn secondary"
-                  style={
-                    activeSize === key
-                      ? { background: "color-mix(in srgb, var(--brand) 16%, transparent)" }
-                      : undefined
-                  }
-                  onClick={() => setEstimate(sizeMinutes[key])}
-                >
-                  {key[0].toUpperCase() + key.slice(1)} ({sizeMinutes[key]}m)
-                </button>
-              ))}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem" }}>
+                <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
+                  Starts
+                  <input
+                    className="field"
+                    type="time"
+                    value={eventStart}
+                    onChange={(e) => setEventStart(e.target.value)}
+                    required
+                  />
+                </label>
+                <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
+                  Ends
+                  <input
+                    className="field"
+                    type="time"
+                    value={eventEnd}
+                    onChange={(e) => setEventEnd(e.target.value)}
+                    required
+                  />
+                </label>
+              </div>
+              {mode === "full" && (
+                <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
+                  Assignee
+                  <AssigneeSelect
+                    members={members}
+                    value={assigneeId}
+                    onChange={setAssigneeId}
+                    meId={meId || members[0]?.id}
+                  />
+                </label>
+              )}
             </div>
-            <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
-              Custom (min)
-              <input
-                className="field"
-                type="number"
-                min={5}
-                step={5}
-                value={estimate}
-                onChange={(e) => setEstimate(Number(e.target.value) || 5)}
-              />
-            </label>
-          </div>
+          ) : (
+            <>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: mode === "full" ? "1fr 1fr" : "1fr",
+                  gap: "0.5rem",
+                }}
+              >
+                <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
+                  Due date
+                  <DueDatePicker value={dueAt} onChange={setDueAt} />
+                </label>
+                {mode === "full" && (
+                  <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
+                    Assignee
+                    <AssigneeSelect
+                      members={members}
+                      value={assigneeId}
+                      onChange={setAssigneeId}
+                      meId={meId || members[0]?.id}
+                    />
+                  </label>
+                )}
+              </div>
+
+              <div>
+                <div style={{ fontSize: "0.85rem", marginBottom: "0.35rem" }}>Task length</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem", marginBottom: "0.5rem" }}>
+                  {SIZE_KEYS.map((key) => (
+                    <button
+                      key={key}
+                      type="button"
+                      className="btn secondary"
+                      style={
+                        activeSize === key
+                          ? { background: "color-mix(in srgb, var(--brand) 16%, transparent)" }
+                          : undefined
+                      }
+                      onClick={() => setEstimate(sizeMinutes[key])}
+                    >
+                      {key[0].toUpperCase() + key.slice(1)} ({sizeMinutes[key]}m)
+                    </button>
+                  ))}
+                </div>
+                <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
+                  Custom (min)
+                  <input
+                    className="field"
+                    type="number"
+                    min={5}
+                    step={5}
+                    value={estimate}
+                    onChange={(e) => setEstimate(Number(e.target.value) || 5)}
+                  />
+                </label>
+              </div>
+            </>
+          )}
 
           {mode === "full" && (
             <>
@@ -534,10 +636,11 @@ export function NewTaskModal({
 
               <textarea
                 className="field"
-                rows={3}
+                rows={6}
                 placeholder="Notes"
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
+                style={{ minHeight: "7.5rem", resize: "vertical" }}
               />
 
               {templates.length > 0 && (
@@ -564,6 +667,7 @@ export function NewTaskModal({
                 </label>
               )}
 
+              {!isEvent && (
               <div style={{ display: "grid", gap: "0.5rem" }}>
                 <label style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
                   <input
@@ -622,6 +726,7 @@ export function NewTaskModal({
                   </div>
                 )}
               </div>
+              )}
 
               <div style={{ display: "grid", gap: "0.5rem" }}>
                 <div style={{ fontSize: "0.85rem", fontWeight: 600 }}>Checklist</div>
@@ -827,7 +932,7 @@ export function NewTaskModal({
           }}
         >
           <button className="btn" type="submit" disabled={saving} style={{ width: "100%" }}>
-            {saving ? "Creating…" : "Create & schedule"}
+            {saving ? "Creating…" : isEvent ? "Create event" : "Create & schedule"}
           </button>
         </div>
       </form>

@@ -2,15 +2,13 @@ import { NextResponse } from "next/server";
 import { requireUser, jsonError } from "@/lib/api";
 import { getUserWorkspaces, ensurePersonalWorkspace } from "@/lib/workspace";
 import { prisma } from "@/lib/db";
-import { auth } from "@/lib/auth";
 
 export async function GET() {
-  const { userId, error } = await requireUser();
+  const { userId, session, error } = await requireUser();
   if (error) return error;
 
   let memberships = await getUserWorkspaces(userId);
   if (memberships.length === 0) {
-    const session = await auth();
     await ensurePersonalWorkspace(
       userId,
       session?.user?.name ?? session?.user?.email ?? "User"

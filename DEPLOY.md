@@ -19,6 +19,8 @@ npm run deploy -w @momentum/web
 
 Live URL: https://momentum.momentum-app.workers.dev
 
+**Important:** OpenNext + Prisma needs the **Workers Paid** plan. On Free (10 ms CPU), pages often return **Error 1102 Worker exceeded resource limits**, especially on cold starts. Paid is ~$5/mo and raises the default CPU budget to 30 s.
+
 Point the mobile app at that URL (`VITE_SYNC_API_URL`) and rebuild the APK.
 
 Optional: set a custom domain on the Worker in the Cloudflare dashboard, then set `AUTH_URL` / `NEXT_PUBLIC_APP_URL` to that domain via `wrangler secret put` / vars.
@@ -41,8 +43,25 @@ npm run tunnel
 
 Not always-on — stops when your PC sleeps or the process exits.
 
-## Auth env for production
+### Auth env for production
 
 - `AUTH_SECRET` — required (`npx wrangler secret put AUTH_SECRET`)
 - `AUTH_URL` / `NEXT_PUBLIC_APP_URL` — set if using a custom domain
 - Optional: `AUTH_MICROSOFT_ENTRA_ID_*`, `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET`
+
+### Google sign-in (optional)
+
+1. Create an OAuth client in [Google Cloud Console](https://console.cloud.google.com/apis/credentials) (Web application).
+2. Add authorized redirect URI:
+   - `https://momentum.momentum-app.workers.dev/api/auth/callback/google`
+   - plus `http://localhost:3000/api/auth/callback/google` for local dev
+3. Put secrets on the Worker:
+
+```bash
+npx wrangler secret put AUTH_GOOGLE_ID
+npx wrangler secret put AUTH_GOOGLE_SECRET
+```
+
+4. Redeploy: `npm run deploy -w @momentum/web`
+
+The login page shows **Continue with Google** when both secrets are present.

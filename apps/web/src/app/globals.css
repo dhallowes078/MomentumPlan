@@ -171,9 +171,16 @@ select {
   min-width: 0;
 }
 
-.app-header-cta {
+.app-header-actions {
   grid-area: cta;
   justify-self: end;
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.app-header-actions .btn {
   white-space: nowrap;
 }
 
@@ -203,7 +210,8 @@ select {
     font-size: 0.78rem;
   }
 
-  .app-header-cta {
+  .app-header-cta,
+  .app-header-actions .btn {
     padding-inline: 0.75rem;
   }
 
@@ -845,26 +853,38 @@ html.is-native .app-main {
 .task-fade-card {
   position: relative;
   overflow: hidden;
+  background-color: var(--bg-elevated);
 }
 
 .task-fade-card::after {
   content: "";
   position: absolute;
-  inset: 0 0 0 45%;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
   background: linear-gradient(
     90deg,
-    transparent 0%,
-    color-mix(in srgb, var(--fade-color, var(--brand)) 28%, transparent) 100%
+    var(--bg-elevated) 0%,
+    var(--bg-elevated) 28%,
+    color-mix(in srgb, var(--fade-color, var(--brand)) 22%, transparent) 62%,
+    color-mix(in srgb, var(--fade-color, var(--brand)) 55%, transparent) 100%
   );
-  pointer-events: none;
 }
 
 .task-fade-card[data-has-header]::after {
   background:
-    linear-gradient(90deg, transparent 0%, rgba(0, 0, 0, 0.12) 100%),
+    linear-gradient(
+      90deg,
+      var(--bg-elevated) 0%,
+      color-mix(in srgb, var(--bg-elevated) 88%, transparent) 34%,
+      transparent 58%
+    ),
     var(--fade-image) center right / cover no-repeat;
-  -webkit-mask-image: linear-gradient(90deg, transparent 0%, black 55%);
-  mask-image: linear-gradient(90deg, transparent 0%, black 55%);
+}
+
+.task-fade-card > * {
+  position: relative;
+  z-index: 1;
 }
 
 .dragging-item {

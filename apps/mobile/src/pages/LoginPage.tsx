@@ -19,19 +19,31 @@ export function LoginPage({
     setError(null);
     try {
       clearStoredSyncApiBase();
+      const digits = code.replace(/\D/g, "").slice(0, 6);
+      if (digits.length !== 6) {
+        throw new Error("Enter the 6-digit code from Settings");
+      }
       const res = await fetch(apiUrl("/api/auth/device-token"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code }),
+        body: JSON.stringify({ code: digits }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || "Could not link device");
       }
       const data = await res.json();
+      if (!data?.token) throw new Error("No sync token returned");
       setDeviceToken(data.token);
       await pullFromServer();
       await flushOutbox();
+      // Confirm tasks actually arrived — empty workspace is ok, auth failure is not.
+      const probe = await fetch(apiUrl("/api/workspaces"), {
+        headers: { Authorization: `Bearer ${data.token}` },
+      });
+      if (!probe.ok) {
+        throw new Error("Linked, but could not load workspaces. Try again.");
+      }
       onLinked();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Link failed");

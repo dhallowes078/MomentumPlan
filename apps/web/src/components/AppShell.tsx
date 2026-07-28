@@ -3,7 +3,16 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CalendarDays, CheckSquare, Cloud, CloudOff, Plus, Settings2, SunMedium } from "lucide-react";
+import {
+  CalendarClock,
+  CalendarDays,
+  CheckSquare,
+  Cloud,
+  CloudOff,
+  Plus,
+  Settings2,
+  SunMedium,
+} from "lucide-react";
 import clsx from "clsx";
 import { NewTaskModal } from "@/components/NewTaskModal";
 import { TrafficLights } from "@/components/TrafficLights";
@@ -52,6 +61,7 @@ function AppShellInner({
   const pathname = usePathname();
   const [newTaskOpen, setNewTaskOpen] = useState(false);
   const [newTaskMode, setNewTaskMode] = useState<"simple" | "full">("full");
+  const [newVariant, setNewVariant] = useState<"task" | "event">("task");
 
   useEffect(() => {
     if ("serviceWorker" in navigator) {
@@ -60,9 +70,10 @@ function AppShellInner({
     void import("@/lib/local/notifications")
       .then((m) => m.initNotifications())
       .catch(() => undefined);
+    // Pack on the client / when user explicitly syncs — avoid hammering the Worker.
     const id = window.setInterval(() => {
-      void fetch("/api/schedule/run", { method: "POST" });
-    }, 300_000);
+      void fetch("/api/schedule/run", { method: "POST" }).catch(() => undefined);
+    }, 30 * 60_000);
     return () => window.clearInterval(id);
   }, []);
 
@@ -79,15 +90,28 @@ function AppShellInner({
           <SyncBadge />
           <TrafficLights compact />
         </div>
-        <button
-          className="btn app-header-cta"
-          onClick={() => {
-            setNewTaskMode("full");
-            setNewTaskOpen(true);
-          }}
-        >
-          <Plus size={16} /> <span className="app-header-cta-label">New Task</span>
-        </button>
+        <div className="app-header-actions">
+          <button
+            className="btn"
+            onClick={() => {
+              setNewVariant("task");
+              setNewTaskMode("full");
+              setNewTaskOpen(true);
+            }}
+          >
+            <Plus size={16} /> <span className="app-header-cta-label">New Task</span>
+          </button>
+          <button
+            className="btn secondary"
+            onClick={() => {
+              setNewVariant("event");
+              setNewTaskMode("full");
+              setNewTaskOpen(true);
+            }}
+          >
+            <CalendarClock size={16} /> <span className="app-header-cta-label">New Event</span>
+          </button>
+        </div>
       </header>
 
       <aside className="card side-nav">
@@ -144,6 +168,7 @@ function AppShellInner({
       <NewTaskModal
         open={newTaskOpen}
         initialMode={newTaskMode}
+        variant={newVariant}
         onClose={() => setNewTaskOpen(false)}
       />
     </div>

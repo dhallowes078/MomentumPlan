@@ -29,6 +29,29 @@ export async function PATCH(
         : {}),
       ...(typeof body.color === "string" ? { color: body.color } : {}),
       ...(typeof body.position === "number" ? { position: body.position } : {}),
+      ...(body.clearSchedule === true
+        ? {
+            workDays: null,
+            startMinutes: null,
+            endMinutes: null,
+            breakStartMinutes: null,
+            breakEndMinutes: null,
+          }
+        : {
+            ...(Array.isArray(body.workDays) ? { workDays: body.workDays } : {}),
+            ...(body.startMinutes === null || typeof body.startMinutes === "number"
+              ? { startMinutes: body.startMinutes }
+              : {}),
+            ...(body.endMinutes === null || typeof body.endMinutes === "number"
+              ? { endMinutes: body.endMinutes }
+              : {}),
+            ...(body.breakStartMinutes === null || typeof body.breakStartMinutes === "number"
+              ? { breakStartMinutes: body.breakStartMinutes }
+              : {}),
+            ...(body.breakEndMinutes === null || typeof body.breakEndMinutes === "number"
+              ? { breakEndMinutes: body.breakEndMinutes }
+              : {}),
+          }),
     },
   });
 

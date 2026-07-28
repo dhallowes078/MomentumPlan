@@ -34,18 +34,47 @@ export async function runLocalScheduler() {
     workspaces.flatMap((w) => (w.buckets ?? []).map((b) => [b.id, b] as const))
   );
 
-  const schedulable: SchedulableTask[] = tasks.map((t) => ({
-    id: t.id,
-    priority: t.priority,
-    estimateMinutes: t.estimateMinutes,
-    dueAt: t.dueAt ? new Date(t.dueAt) : null,
-    locked: Boolean(t.locked),
-    lockedStart: t.locked && t.scheduledStart ? new Date(t.scheduledStart) : null,
-    lockedEnd: t.locked && t.scheduledEnd ? new Date(t.scheduledEnd) : null,
-    allowSplit: t.allowSplit !== false,
-    position: t.position,
-    createdAt: new Date(t.updatedAt || Date.now()),
-  }));
+  const schedulable: SchedulableTask[] = tasks.map((t) => {
+    const bucket =
+      t.bucket ?? (t.bucketId ? bucketById.get(t.bucketId) ?? null : null);
+    const hasBucketHours =
+      bucket &&
+      (bucket.startMinutes != null ||
+        bucket.endMinutes != null ||
+        (Array.isArray(bucket.workDays) && bucket.workDays.length > 0) ||
+        bucket.breakStartMinutes != null ||
+        bucket.breakEndMinutes != null);
+    return {
+      id: t.id,
+      priority: t.priority,
+      estimateMinutes: t.estimateMinutes,
+      dueAt: t.dueAt ? new Date(t.dueAt) : null,
+      locked: Boolean(t.locked),
+      lockedStart: t.locked && t.scheduledStart ? new Date(t.scheduledStart) : null,
+      lockedEnd: t.locked && t.scheduledEnd ? new Date(t.scheduledEnd) : null,
+      allowSplit: t.allowSplit !== false,
+      position: t.position,
+      createdAt: new Date(t.updatedAt || Date.now()),
+      workHours: hasBucketHours
+        ? {
+            days:
+              Array.isArray(bucket.workDays) && bucket.workDays.length
+                ? bucket.workDays
+                : prefs.workHours.days,
+            startMinutes: bucket.startMinutes ?? prefs.workHours.startMinutes,
+            endMinutes: bucket.endMinutes ?? prefs.workHours.endMinutes,
+            breakStartMinutes:
+              bucket.breakStartMinutes !== undefined
+                ? bucket.breakStartMinutes
+                : prefs.workHours.breakStartMinutes,
+            breakEndMinutes:
+              bucket.breakEndMinutes !== undefined
+                ? bucket.breakEndMinutes
+                : prefs.workHours.breakEndMinutes,
+          }
+        : null,
+    };
+  });
 
   const meetings = await localDb.meetings.toArray();
   const busy: BusyBlock[] = meetings

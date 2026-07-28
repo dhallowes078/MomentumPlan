@@ -5,6 +5,7 @@ import { assertWorkspaceAccess } from "@/lib/workspace";
 import { prisma } from "@/lib/db";
 import { runSchedulerForUser } from "@/lib/scheduler-service";
 import { getFileUrl } from "@/lib/storage";
+import { runInBackground } from "@/lib/background";
 
 const createSchema = z.object({
   workspaceId: z.string().min(1),
@@ -19,6 +20,8 @@ const createSchema = z.object({
   links: z.array(z.object({ url: z.string().url(), title: z.string().optional() })).optional(),
   locked: z.boolean().optional(),
   allowSplit: z.boolean().optional(),
+  scheduledStart: z.string().datetime().optional().nullable(),
+  scheduledEnd: z.string().datetime().optional().nullable(),
   isRecurring: z.boolean().optional(),
   recurFreq: z.enum(["DAILY", "WEEKLY", "MONTHLY"]).nullable().optional(),
   recurInterval: z.number().int().min(1).max(52).optional(),
@@ -84,6 +87,10 @@ export async function POST(req: Request) {
     return jsonError("Forbidden", 403);
   }
 
+  const locked = data.locked ?? false;
+  const scheduledStart = data.scheduledStart ? new Date(data.scheduledStart) : null;
+  const scheduledEnd = data.scheduledEnd ? new Date(data.scheduledEnd) : null;
+
   const task = await prisma.task.create({
     data: {
       workspaceId: data.workspaceId,
@@ -96,8 +103,12 @@ export async function POST(req: Request) {
       bucketId: data.bucketId ?? null,
       assigneeId: data.assigneeId ?? userId,
       createdById: userId,
-      locked: data.locked ?? false,
-      allowSplit: data.allowSplit ?? true,
+      locked,
+      allowSplit: locked ? false : (data.allowSplit ?? true),
+      scheduledStart,
+      scheduledEnd,
+      originalScheduledStart: scheduledStart,
+      originalScheduledEnd: scheduledEnd,
       templateId: data.templateId ?? null,
       isRecurring: data.isRecurring ?? false,
       recurFreq: data.isRecurring ? data.recurFreq ?? "WEEKLY" : null,
@@ -105,18 +116,28 @@ export async function POST(req: Request) {
       recurByWeekdays: data.recurByWeekdays ?? undefined,
       recurEndsAt: data.recurEndsAt ? new Date(data.recurEndsAt) : null,
       recurCount: data.recurCount ?? null,
-      links: data.links
-        ? { create: data.links.map((l) => ({ url: l.url, title: l.title })) }
-        : undefined,
-      events: {
-        create: { type: "CREATED", actorId: userId },
-      },
     },
+  });
+
+  // Flatten nested writes for D1 compatibility.
+  if (data.links?.length) {
+    for (const l of data.links) {
+      await prisma.taskLink.create({
+        data: { taskId: task.id, url: l.url, title: l.title },
+      });
+    }
+  }
+  await prisma.taskEvent.create({
+    data: { taskId: task.id, type: "CREATED", actorId: userId },
+  });
+
+  const full = await prisma.task.findUnique({
+    where: { id: task.id },
     include: { links: true, bucket: true, assignee: true },
   });
 
-  // Fire-and-forget reschedule
-  void runSchedulerForUser(userId).catch(console.error);
+  // Fire-and-forget reschedule (waitUntil so it can finish after the response)
+  runInBackground(runSchedulerForUser(userId));
 
-  return NextResponse.json({ task }, { status: 201 });
+  return NextResponse.json({ task: full }, { status: 201 });
 }

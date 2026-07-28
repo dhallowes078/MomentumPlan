@@ -121,6 +121,12 @@ model Bucket {
   name        String
   color       String   @default("#3D6B4F")
   position    Int      @default(0)
+  /** Optional schedule window for tasks in this bucket (null = use user SchedulePrefs). */
+  workDays          Json?
+  startMinutes      Int?
+  endMinutes        Int?
+  breakStartMinutes Int?
+  breakEndMinutes   Int?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

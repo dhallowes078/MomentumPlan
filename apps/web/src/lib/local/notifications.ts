@@ -90,27 +90,64 @@ export async function clearTaskNotifications() {
 
 let webTimers: number[] = [];
 
+async function showWebNotification(title: string, body: string, tag?: string) {
+  if (typeof window === "undefined") return;
+  if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+
+  try {
+    const reg = await navigator.serviceWorker?.ready;
+    if (reg?.active) {
+      reg.active.postMessage({
+        type: "show-notification",
+        title,
+        body,
+        tag,
+        url: "/today",
+        renotify: true,
+      });
+      return;
+    }
+  } catch {
+    // fall through
+  }
+
+  try {
+    new Notification(title, { body, tag, icon: "/icon.svg" });
+  } catch {
+    // ignore
+  }
+}
+
 function scheduleWebFallbacks(blocks: LocalScheduleBlock[], prefs: LocalPrefs) {
   if (typeof window === "undefined") return;
   for (const id of webTimers) window.clearTimeout(id);
   webTimers = [];
   if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+
   const now = Date.now();
+  // Browsers throttle long setTimeouts; keep a rolling window and refresh often.
+  const MAX_AHEAD_MS = 6 * 60 * 60 * 1000;
+
   for (const b of blocks) {
     const title = b.task?.title ?? "Task";
     const startAt = shiftOutOfQuiet(prefs, new Date(b.start)).getTime();
     const endAt = shiftOutOfQuiet(prefs, new Date(b.end)).getTime();
-    if (startAt > now) {
+
+    if (startAt > now && startAt - now < MAX_AHEAD_MS) {
       webTimers.push(
         window.setTimeout(() => {
-          new Notification(`Time for ${title}`, { body: "Have you started? Open Momentum to update." });
+          void showWebNotification(`Time for ${title}`, "Have you started? Open Momentum to update.", `start-${b.id}`);
         }, startAt - now)
       );
+    } else if (startAt <= now && endAt > now && b.task?.status !== "IN_PROGRESS" && b.task?.status !== "DONE") {
+      // Missed start — nudge once if the block is still underway.
+      void showWebNotification(`Time for ${title}`, "Have you started? Open Momentum to update.", `start-late-${b.id}`);
     }
-    if (endAt > now) {
+
+    if (endAt > now && endAt - now < MAX_AHEAD_MS) {
       webTimers.push(
         window.setTimeout(() => {
-          new Notification(`${title} ending`, { body: "Finished? Open Momentum to update." });
+          void showWebNotification(`${title} ending`, "Finished? Open Momentum to update.", `end-${b.id}`);
         }, endAt - now)
       );
     }
@@ -123,6 +160,8 @@ export async function rescheduleTaskNotifications() {
   const prefs = await repo.getPrefs();
   if (!prefs.notificationsEnabled) {
     await clearTaskNotifications();
+    for (const id of webTimers) window.clearTimeout(id);
+    webTimers = [];
     return;
   }
 
@@ -205,6 +244,7 @@ export async function rescheduleTaskNotifications() {
 }
 
 let actionsRegistered = false;
+let webRefreshTimer: number | null = null;
 
 export async function registerNotificationActions() {
   if (typeof window === "undefined" || actionsRegistered) return;
@@ -290,4 +330,17 @@ export async function registerNotificationActions() {
 export async function initNotifications() {
   await registerNotificationActions();
   await rescheduleTaskNotifications();
+
+  if (typeof window !== "undefined" && webRefreshTimer == null) {
+    // Refresh web timers so long-horizon blocks still notify.
+    webRefreshTimer = window.setInterval(() => {
+      void rescheduleTaskNotifications();
+    }, 15 * 60_000);
+    window.addEventListener("focus", () => {
+      void rescheduleTaskNotifications();
+    });
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") void rescheduleTaskNotifications();
+    });
+  }
 }

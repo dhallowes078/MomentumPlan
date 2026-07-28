@@ -84,3 +84,31 @@ export async function apiFetch(path: string, init?: RequestInit): Promise<Respon
   });
   return fetch(apiUrl(path), { ...init, headers });
 }
+
+/**
+ * Absolute media URL for img/CSS backgrounds.
+ * On mobile, attachments need the sync host + device token (img tags can't send Authorization).
+ */
+export function resolveMediaUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  if (url.startsWith("data:") || url.startsWith("blob:")) return url;
+  if (url.startsWith("http://") || url.startsWith("https://")) {
+    return appendDeviceTokenIfNeeded(url);
+  }
+  const absolute = apiUrl(url);
+  return appendDeviceTokenIfNeeded(absolute);
+}
+
+function appendDeviceTokenIfNeeded(url: string): string {
+  if (!url.includes("/api/attachments/")) return url;
+  const token = getDeviceToken();
+  if (!token) return url;
+  try {
+    const u = new URL(url, typeof window !== "undefined" ? window.location.origin : LIVE_SYNC_URL);
+    if (!u.searchParams.has("token")) u.searchParams.set("token", token);
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
+

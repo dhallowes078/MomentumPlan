@@ -86,6 +86,38 @@ export async function updateLocalBucketColor(
   });
 }
 
+export async function updateLocalBucketSchedule(
+  workspaceId: string,
+  bucketId: string,
+  schedule: {
+    workDays?: number[] | null;
+    startMinutes?: number | null;
+    endMinutes?: number | null;
+    breakStartMinutes?: number | null;
+    breakEndMinutes?: number | null;
+  } | null
+) {
+  const ws = await getWorkspace(workspaceId);
+  if (!ws) return;
+  await localDb.workspaces.put({
+    ...ws,
+    buckets: (ws.buckets ?? []).map((b) =>
+      b.id === bucketId
+        ? schedule
+          ? { ...b, ...schedule }
+          : {
+              ...b,
+              workDays: null,
+              startMinutes: null,
+              endMinutes: null,
+              breakStartMinutes: null,
+              breakEndMinutes: null,
+            }
+        : b
+    ),
+  });
+}
+
 export async function listWorkspaces(): Promise<LocalWorkspace[]> {
   return localDb.workspaces.toArray();
 }
@@ -131,6 +163,10 @@ export async function createLocalTask(input: {
   bucketId?: string | null;
   assigneeId?: string | null;
   dueAt?: string | null;
+  locked?: boolean;
+  allowSplit?: boolean;
+  scheduledStart?: string | null;
+  scheduledEnd?: string | null;
   links?: { url: string; title?: string }[];
   isRecurring?: boolean;
   recurFreq?: string | null;
@@ -145,6 +181,7 @@ export async function createLocalTask(input: {
   const bucket = input.bucketId
     ? ws?.buckets.find((b) => b.id === input.bucketId) ?? null
     : null;
+  const locked = Boolean(input.locked);
   const task: LocalTask = {
     id,
     workspaceId: input.workspaceId,
@@ -157,11 +194,11 @@ export async function createLocalTask(input: {
     priority: input.priority ?? 3,
     estimateMinutes: input.estimateMinutes ?? 30,
     dueAt: input.dueAt ?? null,
-    scheduledStart: null,
-    scheduledEnd: null,
+    scheduledStart: input.scheduledStart ?? null,
+    scheduledEnd: input.scheduledEnd ?? null,
     atRisk: false,
-    locked: false,
-    allowSplit: true,
+    locked,
+    allowSplit: input.allowSplit !== false && !locked,
     position: 0,
     completedAt: null,
     assigneeId: input.assigneeId ?? null,
@@ -184,6 +221,10 @@ export async function createLocalTask(input: {
       bucketId: task.bucketId,
       assigneeId: task.assigneeId,
       dueAt: task.dueAt,
+      locked: task.locked,
+      allowSplit: task.allowSplit,
+      scheduledStart: task.scheduledStart,
+      scheduledEnd: task.scheduledEnd,
       links: input.links,
       isRecurring: input.isRecurring ?? false,
       recurFreq: input.recurFreq ?? null,

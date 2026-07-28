@@ -15,6 +15,8 @@ export type SchedulableTask = {
   /** Manual agenda order from drag-reorder (lower = earlier). */
   position?: number;
   createdAt: Date;
+  /** Optional per-bucket work hours; when set, packing uses these instead of global prefs. */
+  workHours?: WorkHours | null;
 };
 
 export type WorkHours = {
@@ -310,6 +312,22 @@ function applyBufferAfterPlacements(
   return next;
 }
 
+function mergeWorkHours(base: WorkHours, override?: WorkHours | null): WorkHours {
+  if (!override) return base;
+  return {
+    days: override.days?.length ? override.days : base.days,
+    startMinutes: override.startMinutes ?? base.startMinutes,
+    endMinutes: override.endMinutes ?? base.endMinutes,
+    breakStartMinutes:
+      override.breakStartMinutes !== undefined
+        ? override.breakStartMinutes
+        : base.breakStartMinutes,
+    breakEndMinutes:
+      override.breakEndMinutes !== undefined ? override.breakEndMinutes : base.breakEndMinutes,
+    timezone: override.timezone ?? base.timezone,
+  };
+}
+
 /**
  * Greedy Motion-style packer: priority → due date → created,
  * earliest free slots within work hours.
@@ -323,7 +341,6 @@ export function packSchedule(
   const planningEnd = addDays(now, prefs.planningDays);
   // Start packing from the next grid mark so nothing lands off-grid.
   const packFrom = ceilToGrid(now);
-  let slots = freeSlots(packFrom, planningEnd, busy, prefs);
 
   const placements: Placement[] = [];
   const unplaced: ScheduleResult["unplaced"] = [];
@@ -341,16 +358,21 @@ export function packSchedule(
       lockedBusy.push({ start: t.lockedStart, end: t.lockedEnd });
     }
   }
-  if (lockedBusy.length) {
-    slots = freeSlots(packFrom, planningEnd, [...busy, ...lockedBusy], prefs);
-    slots = applyBufferAfterPlacements(slots, lockedBusy, prefs.bufferMinutes);
-  }
+
+  const placedBusy: BusyBlock[] = [...lockedBusy];
 
   const candidates = sortTasks(
     tasks.filter((t) => !t.locked && t.estimateMinutes > 0)
   );
 
   for (const task of candidates) {
+    const taskPrefs: SchedulerPrefs = {
+      ...prefs,
+      workHours: mergeWorkHours(prefs.workHours, task.workHours),
+    };
+    let slots = freeSlots(packFrom, planningEnd, [...busy, ...placedBusy], taskPrefs);
+    slots = applyBufferAfterPlacements(slots, placedBusy, prefs.bufferMinutes);
+
     const allowSplit = task.allowSplit ?? true;
     const taken = takeFromSlots(
       slots,
@@ -369,12 +391,6 @@ export function packSchedule(
       continue;
     }
 
-    slots = applyBufferAfterPlacements(
-      taken.remainingSlots,
-      taken.placements,
-      prefs.bufferMinutes
-    );
-    // Use first contiguous placement as primary; additional chunks as extra placements
     for (const p of taken.placements) {
       const atRisk = Boolean(task.dueAt && p.end > task.dueAt);
       placements.push({
@@ -383,6 +399,7 @@ export function packSchedule(
         end: p.end,
         atRisk,
       });
+      placedBusy.push({ start: p.start, end: p.end });
     }
   }
 

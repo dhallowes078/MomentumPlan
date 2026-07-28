@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { Keyboard } from "lucide-react";
 
 const PICKS = [
@@ -24,6 +24,7 @@ export function EmojiPicker({
   onChange: (emoji: string | null) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const [open, setOpen] = useState(false);
 
   return (
     <div style={{ display: "grid", gap: "0.4rem" }}>
@@ -45,7 +46,6 @@ export function EmojiPicker({
               const el = inputRef.current;
               if (!el) return;
               el.focus();
-              // Android/iOS: focusing the field opens the soft keyboard (emoji tab available).
               try {
                 el.setSelectionRange(el.value.length, el.value.length);
               } catch {
@@ -72,8 +72,11 @@ export function EmojiPicker({
           fontSize: "0.85rem",
         }}
       >
-        <span
-          aria-hidden
+        <button
+          type="button"
+          aria-label="Quick emoji picks"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
           style={{
             width: 36,
             height: 36,
@@ -83,10 +86,12 @@ export function EmojiPicker({
             border: "1px solid var(--line)",
             background: "var(--field-bg)",
             fontSize: "1.25rem",
+            cursor: "pointer",
+            padding: 0,
           }}
         >
           {value || "🙂"}
-        </span>
+        </button>
         <input
           ref={inputRef}
           className="field"
@@ -102,26 +107,30 @@ export function EmojiPicker({
             onChange(next);
           }}
           onFocus={(e) => {
-            // Helps some Android keyboards surface the emoji panel faster.
             e.currentTarget.select();
           }}
         />
       </label>
 
-      <div className="emoji-picker-grid" aria-label="Quick emoji picks">
-        {PICKS.map((emoji) => (
-          <button
-            key={emoji}
-            type="button"
-            className="emoji-pick"
-            data-active={value === emoji ? "true" : "false"}
-            onClick={() => onChange(value === emoji ? null : emoji)}
-            title={emoji}
-          >
-            {emoji}
-          </button>
-        ))}
-      </div>
+      {open && (
+        <div className="emoji-picker-grid" aria-label="Quick emoji picks">
+          {PICKS.map((emoji) => (
+            <button
+              key={emoji}
+              type="button"
+              className="emoji-pick"
+              data-active={value === emoji ? "true" : "false"}
+              onClick={() => {
+                onChange(value === emoji ? null : emoji);
+                setOpen(false);
+              }}
+              title={emoji}
+            >
+              {emoji}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

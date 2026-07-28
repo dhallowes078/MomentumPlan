@@ -1,4 +1,4 @@
-const CACHE = "momentum-v2";
+const CACHE = "momentum-v3";
 const ASSETS = ["/", "/today", "/tasks", "/calendar", "/settings", "/manifest.webmanifest", "/icon.svg"];
 
 self.addEventListener("install", (event) => {
@@ -38,14 +38,40 @@ self.addEventListener("fetch", (event) => {
   );
 });
 
+/** Show a notification from the page (desktop web). */
+self.addEventListener("message", (event) => {
+  const data = event.data;
+  if (!data || data.type !== "show-notification") return;
+  const title = data.title || "Momentum";
+  const options = {
+    body: data.body || "",
+    icon: "/icon.svg",
+    badge: "/icon.svg",
+    tag: data.tag || undefined,
+    data: { url: data.url || "/today" },
+    renotify: Boolean(data.renotify),
+  };
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
+  const target = (event.notification.data && event.notification.data.url) || "/today";
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
       for (const client of clients) {
-        if ("focus" in client) return client.focus();
+        if ("focus" in client) {
+          if ("navigate" in client) {
+            try {
+              client.navigate(target);
+            } catch {
+              // ignore
+            }
+          }
+          return client.focus();
+        }
       }
-      if (self.clients.openWindow) return self.clients.openWindow("/today");
+      if (self.clients.openWindow) return self.clients.openWindow(target);
     })
   );
 });

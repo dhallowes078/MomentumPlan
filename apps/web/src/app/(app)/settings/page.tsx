@@ -12,6 +12,7 @@ import {
   enableLocalTestMode,
   putPrefs as putLocalPrefs,
   updateLocalBucketColor,
+  updateLocalBucketSchedule,
 } from "@/lib/local/repo";
 import {
   requestNotificationPermission,
@@ -43,7 +44,16 @@ type Prefs = {
   quietHoursEnd?: number | null;
 };
 
-type Bucket = { id: string; name: string; color: string };
+type Bucket = {
+  id: string;
+  name: string;
+  color: string;
+  workDays?: number[] | null;
+  startMinutes?: number | null;
+  endMinutes?: number | null;
+  breakStartMinutes?: number | null;
+  breakEndMinutes?: number | null;
+};
 
 type Workspace = {
   id: string;
@@ -137,6 +147,7 @@ export default function SettingsPage() {
   const [activeWs, setActiveWs] = useState("");
   const [bucketName, setBucketName] = useState("");
   const [bucketColor, setBucketColor] = useState(BUCKET_COLORS[0]);
+  const [scheduleTarget, setScheduleTarget] = useState("default");
   const [saved, setSaved] = useState(false);
   const [profileSaved, setProfileSaved] = useState(false);
   const [accessCode, setAccessCode] = useState<string | null>(null);
@@ -347,6 +358,120 @@ export default function SettingsPage() {
     await rescheduleTaskNotifications();
     setSaved(true);
     setTimeout(() => setSaved(false), 1500);
+  }
+
+  async function saveBucketSchedule() {
+    if (!prefs || scheduleTarget === "default" || !activeWs) return;
+    const ws = workspaces.find((w) => w.id === activeWs);
+    const bucket = ws?.buckets?.find((b) => b.id === scheduleTarget);
+    if (!bucket) return;
+    const body = {
+      workDays: bucket.workDays?.length ? bucket.workDays : prefs.workDays,
+      startMinutes: bucket.startMinutes ?? prefs.startMinutes,
+      endMinutes: bucket.endMinutes ?? prefs.endMinutes,
+      breakStartMinutes: bucket.breakStartMinutes ?? prefs.breakStartMinutes,
+      breakEndMinutes: bucket.breakEndMinutes ?? prefs.breakEndMinutes,
+    };
+    await updateLocalBucketSchedule(activeWs, scheduleTarget, body);
+    setWorkspaces((prev) =>
+      prev.map((w) =>
+        w.id === activeWs
+          ? {
+              ...w,
+              buckets: (w.buckets ?? []).map((b) =>
+                b.id === scheduleTarget ? { ...b, ...body } : b
+              ),
+            }
+          : w
+      )
+    );
+    const res = await fetch(`/api/buckets/${scheduleTarget}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.bucket) {
+        setWorkspaces((prev) =>
+          prev.map((w) =>
+            w.id === activeWs
+              ? {
+                  ...w,
+                  buckets: (w.buckets ?? []).map((b) =>
+                    b.id === scheduleTarget ? { ...b, ...data.bucket } : b
+                  ),
+                }
+              : w
+          )
+        );
+      }
+    }
+    try {
+      const { runLocalScheduler } = await import("@/lib/local/scheduler");
+      await runLocalScheduler();
+    } catch {
+      /* optional */
+    }
+    void fetch("/api/schedule/run", { method: "POST" });
+    setSaved(true);
+    setTimeout(() => setSaved(false), 1500);
+  }
+
+  async function clearBucketSchedule() {
+    if (scheduleTarget === "default" || !activeWs) return;
+    await updateLocalBucketSchedule(activeWs, scheduleTarget, null);
+    setWorkspaces((prev) =>
+      prev.map((w) =>
+        w.id === activeWs
+          ? {
+              ...w,
+              buckets: (w.buckets ?? []).map((b) =>
+                b.id === scheduleTarget
+                  ? {
+                      ...b,
+                      workDays: null,
+                      startMinutes: null,
+                      endMinutes: null,
+                      breakStartMinutes: null,
+                      breakEndMinutes: null,
+                    }
+                  : b
+              ),
+            }
+          : w
+      )
+    );
+    await fetch(`/api/buckets/${scheduleTarget}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ clearSchedule: true }),
+    });
+    try {
+      const { runLocalScheduler } = await import("@/lib/local/scheduler");
+      await runLocalScheduler();
+    } catch {
+      /* optional */
+    }
+    void fetch("/api/schedule/run", { method: "POST" });
+    setSaved(true);
+    setTimeout(() => setSaved(false), 1500);
+  }
+
+  function patchScheduleBucket(patch: Partial<Bucket>) {
+    if (scheduleTarget === "default" || !activeWs) return;
+    setWorkspaces((prev) =>
+      prev.map((w) =>
+        w.id === activeWs
+          ? {
+              ...w,
+              buckets: (w.buckets ?? []).map((b) =>
+                b.id === scheduleTarget ? { ...b, ...patch } : b
+              ),
+            }
+          : w
+      )
+    );
   }
 
   async function saveProfile(next: Partial<Profile>, file?: File | null) {
@@ -778,8 +903,9 @@ export default function SettingsPage() {
         >
           <h2 style={{ margin: 0, fontSize: "1rem" }}>Task notifications</h2>
           <p style={{ margin: 0, color: "var(--ink-muted)", fontSize: "0.9rem" }}>
-            On the Android app, Momentum asks at the start and end of each scheduled block whether
-            you have started or finished. Enable notifications and set quiet hours if needed.
+            Momentum prompts at the start and end of each scheduled block. Works on the Android app
+            and in desktop browsers (allow notification permission below). Enable notifications and
+            set quiet hours if needed.
           </p>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "1rem" }}>
             <div>
@@ -951,120 +1077,201 @@ export default function SettingsPage() {
             style={{ padding: "1rem", display: "grid", gap: "0.75rem" }}
             onSubmit={(e) => {
               e.preventDefault();
-              void savePrefs();
+              if (scheduleTarget === "default") void savePrefs();
+              else void saveBucketSchedule();
             }}
           >
             <h2 style={{ margin: 0, fontSize: "1rem" }}>Schedule preferences</h2>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem" }}>
-              {DAY_LABELS.map((label, idx) => {
-                const on = prefs.workDays.includes(idx);
-                return (
-                  <button
-                    key={label}
-                    type="button"
-                    className="btn secondary"
-                    style={on ? { background: "color-mix(in srgb, var(--brand) 14%, transparent)" } : undefined}
-                    onClick={() =>
-                      setPrefs({
-                        ...prefs,
-                        workDays: on
-                          ? prefs.workDays.filter((d) => d !== idx)
-                          : [...prefs.workDays, idx].sort(),
-                      })
-                    }
-                  >
-                    {label}
-                  </button>
-                );
-              })}
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem" }}>
-              <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
-                Day start
-                <input
-                  className="field"
-                  type="time"
-                  value={minutesToInput(prefs.startMinutes)}
-                  onChange={(e) => setPrefs({ ...prefs, startMinutes: inputToMinutes(e.target.value) })}
-                />
-              </label>
-              <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
-                Day end
-                <input
-                  className="field"
-                  type="time"
-                  value={minutesToInput(prefs.endMinutes)}
-                  onChange={(e) => setPrefs({ ...prefs, endMinutes: inputToMinutes(e.target.value) })}
-                />
-              </label>
-              <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
-                Break start
-                <input
-                  className="field"
-                  type="time"
-                  value={minutesToInput(prefs.breakStartMinutes ?? 720)}
-                  onChange={(e) =>
-                    setPrefs({ ...prefs, breakStartMinutes: inputToMinutes(e.target.value) })
-                  }
-                />
-              </label>
-              <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
-                Break end
-                <input
-                  className="field"
-                  type="time"
-                  value={minutesToInput(prefs.breakEndMinutes ?? 780)}
-                  onChange={(e) =>
-                    setPrefs({ ...prefs, breakEndMinutes: inputToMinutes(e.target.value) })
-                  }
-                />
-              </label>
-              <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
-                Planning window (days)
-                <input
-                  className="field"
-                  type="number"
-                  min={1}
-                  max={30}
-                  value={prefs.planningDays}
-                  onChange={(e) => setPrefs({ ...prefs, planningDays: Number(e.target.value) })}
-                />
-              </label>
-              <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
-                Min chunk (min)
-                <input
-                  className="field"
-                  type="number"
-                  min={5}
-                  value={prefs.minChunkMinutes}
-                  onChange={(e) => setPrefs({ ...prefs, minChunkMinutes: Number(e.target.value) })}
-                />
-              </label>
-              <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
-                Buffer after tasks (min)
-                <input
-                  className="field"
-                  type="number"
-                  min={0}
-                  max={60}
-                  step={5}
-                  value={prefs.bufferMinutes}
-                  onChange={(e) =>
-                    setPrefs({
-                      ...prefs,
-                      bufferMinutes: Math.max(0, Math.min(60, Number(e.target.value) || 0)),
-                    })
-                  }
-                />
-              </label>
-            </div>
             <p style={{ margin: 0, color: "var(--ink-muted)", fontSize: "0.85rem" }}>
-              Buffer leaves a gap after each scheduled block (and around meetings) so tasks don’t
-              stack edge-to-edge. Set to 0 for no gap.
+              Default applies to all tasks. Pick a bucket to set a specific timeframe for work in
+              that bucket.
             </p>
-            <button className="btn" type="submit">
-              {saved ? "Saved" : "Save preferences"}
-            </button>
+            <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
+              Applies to
+              <select
+                className="field"
+                value={scheduleTarget}
+                onChange={(e) => setScheduleTarget(e.target.value)}
+              >
+                <option value="default">Default (all tasks)</option>
+                {(current?.buckets ?? []).map((b) => (
+                  <option key={b.id} value={b.id}>
+                    Bucket: {b.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {(() => {
+              const bucket =
+                scheduleTarget === "default"
+                  ? null
+                  : current?.buckets?.find((b) => b.id === scheduleTarget) ?? null;
+              const workDays = bucket?.workDays?.length ? bucket.workDays : prefs.workDays;
+              const startMinutes = bucket?.startMinutes ?? prefs.startMinutes;
+              const endMinutes = bucket?.endMinutes ?? prefs.endMinutes;
+              const breakStart = bucket?.breakStartMinutes ?? prefs.breakStartMinutes ?? 720;
+              const breakEnd = bucket?.breakEndMinutes ?? prefs.breakEndMinutes ?? 780;
+              const setDays = (days: number[]) => {
+                if (bucket) patchScheduleBucket({ workDays: days });
+                else setPrefs({ ...prefs, workDays: days });
+              };
+              return (
+                <>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem" }}>
+                    {DAY_LABELS.map((label, idx) => {
+                      const on = workDays.includes(idx);
+                      return (
+                        <button
+                          key={label}
+                          type="button"
+                          className="btn secondary"
+                          style={
+                            on
+                              ? { background: "color-mix(in srgb, var(--brand) 14%, transparent)" }
+                              : undefined
+                          }
+                          onClick={() =>
+                            setDays(
+                              on ? workDays.filter((d) => d !== idx) : [...workDays, idx].sort()
+                            )
+                          }
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem" }}>
+                    <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
+                      Day start
+                      <input
+                        className="field"
+                        type="time"
+                        value={minutesToInput(startMinutes)}
+                        onChange={(e) => {
+                          const v = inputToMinutes(e.target.value);
+                          if (bucket) patchScheduleBucket({ startMinutes: v });
+                          else setPrefs({ ...prefs, startMinutes: v });
+                        }}
+                      />
+                    </label>
+                    <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
+                      Day end
+                      <input
+                        className="field"
+                        type="time"
+                        value={minutesToInput(endMinutes)}
+                        onChange={(e) => {
+                          const v = inputToMinutes(e.target.value);
+                          if (bucket) patchScheduleBucket({ endMinutes: v });
+                          else setPrefs({ ...prefs, endMinutes: v });
+                        }}
+                      />
+                    </label>
+                    <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
+                      Break start
+                      <input
+                        className="field"
+                        type="time"
+                        value={minutesToInput(breakStart)}
+                        onChange={(e) => {
+                          const v = inputToMinutes(e.target.value);
+                          if (bucket) patchScheduleBucket({ breakStartMinutes: v });
+                          else setPrefs({ ...prefs, breakStartMinutes: v });
+                        }}
+                      />
+                    </label>
+                    <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
+                      Break end
+                      <input
+                        className="field"
+                        type="time"
+                        value={minutesToInput(breakEnd)}
+                        onChange={(e) => {
+                          const v = inputToMinutes(e.target.value);
+                          if (bucket) patchScheduleBucket({ breakEndMinutes: v });
+                          else setPrefs({ ...prefs, breakEndMinutes: v });
+                        }}
+                      />
+                    </label>
+                    {scheduleTarget === "default" && (
+                      <>
+                        <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
+                          Planning window (days)
+                          <input
+                            className="field"
+                            type="number"
+                            min={1}
+                            max={30}
+                            value={prefs.planningDays}
+                            onChange={(e) =>
+                              setPrefs({ ...prefs, planningDays: Number(e.target.value) })
+                            }
+                          />
+                        </label>
+                        <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
+                          Min chunk (min)
+                          <input
+                            className="field"
+                            type="number"
+                            min={5}
+                            value={prefs.minChunkMinutes}
+                            onChange={(e) =>
+                              setPrefs({ ...prefs, minChunkMinutes: Number(e.target.value) })
+                            }
+                          />
+                        </label>
+                        <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
+                          Buffer after tasks (min)
+                          <input
+                            className="field"
+                            type="number"
+                            min={0}
+                            max={60}
+                            step={5}
+                            value={prefs.bufferMinutes}
+                            onChange={(e) =>
+                              setPrefs({
+                                ...prefs,
+                                bufferMinutes: Math.max(
+                                  0,
+                                  Math.min(60, Number(e.target.value) || 0)
+                                ),
+                              })
+                            }
+                          />
+                        </label>
+                      </>
+                    )}
+                  </div>
+                </>
+              );
+            })()}
+            {scheduleTarget === "default" ? (
+              <p style={{ margin: 0, color: "var(--ink-muted)", fontSize: "0.85rem" }}>
+                Buffer leaves a gap after each scheduled block (and around meetings) so tasks don’t
+                stack edge-to-edge. Set to 0 for no gap.
+              </p>
+            ) : (
+              <p style={{ margin: 0, color: "var(--ink-muted)", fontSize: "0.85rem" }}>
+                Tasks in this bucket only pack into these hours. Clear overrides to fall back to
+                the default schedule.
+              </p>
+            )}
+            <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+              <button className="btn" type="submit">
+                {saved ? "Saved" : scheduleTarget === "default" ? "Save preferences" : "Save bucket hours"}
+              </button>
+              {scheduleTarget !== "default" && (
+                <button
+                  className="btn secondary"
+                  type="button"
+                  onClick={() => void clearBucketSchedule()}
+                >
+                  Use default schedule
+                </button>
+              )}
+            </div>
           </form>
       )}
 
@@ -1262,7 +1469,7 @@ export default function SettingsPage() {
                 Connect
               </button>
             ) : (
-              <span className="badge">Coming soon</span>
+              <span className="badge">Add AUTH_GOOGLE_* secrets</span>
             )}
           </div>
 

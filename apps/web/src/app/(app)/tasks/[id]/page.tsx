@@ -26,6 +26,7 @@ import { EmojiPicker } from "@/components/EmojiPicker";
 import { cachedJson, invalidateClientCache } from "@/lib/client-fetch";
 import * as localRepo from "@/lib/local/repo";
 import { flushOutbox, pullFromServer } from "@/lib/local/sync";
+import { resolveMediaUrl } from "@/lib/sync-api";
 
 type Member = {
   id: string;
@@ -532,7 +533,7 @@ export default function TaskDetailPage() {
   }
 
   const headerBackground = draft.headerImageUrl
-    ? `center/cover no-repeat url(${draft.headerImageUrl})`
+    ? `center/cover no-repeat url(${resolveMediaUrl(draft.headerImageUrl)})`
     : draft.bucket
       ? `linear-gradient(135deg, ${draft.bucket.color}, color-mix(in srgb, ${draft.bucket.color} 55%, var(--accent)))`
       : "linear-gradient(135deg, color-mix(in srgb, var(--brand) 35%, transparent), color-mix(in srgb, var(--accent) 22%, transparent))";
@@ -589,7 +590,7 @@ export default function TaskDetailPage() {
       <section className="card" style={{ padding: 0, overflow: "hidden", display: "grid", gap: 0 }}>
         <div
           style={{
-            minHeight: draft.headerImageUrl ? 180 : 96,
+            minHeight: draft.headerImageUrl ? 96 : 72,
             background: headerBackground,
             position: "relative",
           }}

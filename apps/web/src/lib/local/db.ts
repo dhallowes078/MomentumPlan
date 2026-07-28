@@ -1,6 +1,16 @@
 import Dexie, { type EntityTable } from "dexie";
 
-export type LocalBucket = { id: string; name: string; color: string; workspaceId?: string };
+export type LocalBucket = {
+  id: string;
+  name: string;
+  color: string;
+  workspaceId?: string;
+  workDays?: number[] | null;
+  startMinutes?: number | null;
+  endMinutes?: number | null;
+  breakStartMinutes?: number | null;
+  breakEndMinutes?: number | null;
+};
 
 export type LocalTask = {
   id: string;

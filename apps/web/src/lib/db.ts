@@ -3,10 +3,14 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { PrismaClient } from "@prisma/client/wasm";
 import { PrismaD1 } from "@prisma/adapter-d1";
 
-const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
-
 type D1Binding = ConstructorParameters<typeof PrismaD1>[0];
 type CloudflareEnv = { DB?: D1Binding };
+
+const globalForPrisma = globalThis as unknown as {
+  prismaLocal?: PrismaClient;
+  prismaD1?: PrismaClient;
+  prismaD1Binding?: D1Binding;
+};
 
 function createLocalClient() {
   return new PrismaClient({
@@ -54,8 +58,22 @@ async function getD1Async(): Promise<D1Binding | null> {
   }
 }
 
-function clientForD1(db: D1Binding) {
-  return new PrismaClient({ adapter: new PrismaD1(db) });
+/** One Prisma client per isolate — recreating WASM clients per query blows CPU/memory (Error 1102). */
+function clientForD1(db: D1Binding): PrismaClient {
+  if (globalForPrisma.prismaD1 && globalForPrisma.prismaD1Binding === db) {
+    return globalForPrisma.prismaD1;
+  }
+  const client = new PrismaClient({ adapter: new PrismaD1(db) });
+  globalForPrisma.prismaD1 = client;
+  globalForPrisma.prismaD1Binding = db;
+  return client;
+}
+
+function localClient(): PrismaClient {
+  if (!globalForPrisma.prismaLocal) {
+    globalForPrisma.prismaLocal = createLocalClient();
+  }
+  return globalForPrisma.prismaLocal;
 }
 
 /** Prefer this in Server Actions / async routes on Cloudflare. */
@@ -69,10 +87,7 @@ export async function getPrisma(): Promise<PrismaClient> {
     );
   }
 
-  if (!globalForPrisma.prisma) {
-    globalForPrisma.prisma = createLocalClient();
-  }
-  return globalForPrisma.prisma;
+  return localClient();
 }
 
 function getClientSync(): PrismaClient {
@@ -85,16 +100,12 @@ function getClientSync(): PrismaClient {
     );
   }
 
-  if (!globalForPrisma.prisma) {
-    globalForPrisma.prisma = createLocalClient();
-  }
-  return globalForPrisma.prisma;
+  return localClient();
 }
 
 /**
  * Sync-looking Prisma client for existing call sites.
- * On Workers, prefers `cloudflare:workers` then OpenNext sync context.
- * Server Actions should prefer `await getPrisma()`.
+ * Reuses one D1-backed client for the isolate lifetime.
  */
 export const prisma = new Proxy({} as PrismaClient, {
   get(_target, prop, receiver) {

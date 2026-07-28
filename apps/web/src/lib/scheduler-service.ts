@@ -71,22 +71,30 @@ export async function runSchedulerForUser(userId: string) {
     },
     include: {
       scheduleBlocks: true,
+      bucket: true,
     },
   });
 
   let outlookBusy: BusyBlock[] = [];
-  let hasGraph = true;
-  try {
-    const events = await listCalendarEvents(userId, now, windowEnd);
-    outlookBusy = events
-      .filter((e) => !isMomentumEvent(e) && e.showAs !== "free")
-      .map((e) => ({
-        start: new Date(e.start.dateTime.endsWith("Z") ? e.start.dateTime : e.start.dateTime + "Z"),
-        end: new Date(e.end.dateTime.endsWith("Z") ? e.end.dateTime : e.end.dateTime + "Z"),
-      }));
-  } catch (e) {
-    console.warn("Scheduler: Outlook unavailable, packing without calendar busy", e);
-    hasGraph = false;
+  let hasGraph = false;
+  const connection = await prisma.calendarConnection.findUnique({
+    where: { userId },
+    select: { accessToken: true, refreshToken: true },
+  });
+  if (connection?.accessToken || connection?.refreshToken) {
+    hasGraph = true;
+    try {
+      const events = await listCalendarEvents(userId, now, windowEnd);
+      outlookBusy = events
+        .filter((e) => !isMomentumEvent(e) && e.showAs !== "free")
+        .map((e) => ({
+          start: new Date(e.start.dateTime.endsWith("Z") ? e.start.dateTime : e.start.dateTime + "Z"),
+          end: new Date(e.end.dateTime.endsWith("Z") ? e.end.dateTime : e.end.dateTime + "Z"),
+        }));
+    } catch (e) {
+      console.warn("Scheduler: Outlook unavailable, packing without calendar busy", e);
+      hasGraph = false;
+    }
   }
 
   // Completed chunks stay put and count as busy + done time.
@@ -145,6 +153,17 @@ export async function runSchedulerForUser(userId: string) {
       const reserved =
         (completedMinutesByTask.get(t.id) ?? 0) + (stickyMinutesByTask.get(t.id) ?? 0);
       const remaining = Math.max(0, t.estimateMinutes - reserved);
+      const bucket = t.bucket;
+      const bucketDays = Array.isArray(bucket?.workDays)
+        ? (bucket!.workDays as number[])
+        : null;
+      const hasBucketHours =
+        bucket &&
+        (bucket.startMinutes != null ||
+          bucket.endMinutes != null ||
+          (bucketDays && bucketDays.length > 0) ||
+          bucket.breakStartMinutes != null ||
+          bucket.breakEndMinutes != null);
       return {
         id: t.id,
         priority: t.priority,
@@ -156,6 +175,21 @@ export async function runSchedulerForUser(userId: string) {
         allowSplit: t.allowSplit,
         position: t.position,
         createdAt: t.createdAt,
+        workHours: hasBucketHours
+          ? {
+              days: bucketDays?.length ? bucketDays : prefs.workHours.days,
+              startMinutes: bucket!.startMinutes ?? prefs.workHours.startMinutes,
+              endMinutes: bucket!.endMinutes ?? prefs.workHours.endMinutes,
+              breakStartMinutes:
+                bucket!.breakStartMinutes !== undefined
+                  ? bucket!.breakStartMinutes
+                  : prefs.workHours.breakStartMinutes,
+              breakEndMinutes:
+                bucket!.breakEndMinutes !== undefined
+                  ? bucket!.breakEndMinutes
+                  : prefs.workHours.breakEndMinutes,
+            }
+          : null,
       };
     })
     .filter((t) => t.estimateMinutes > 0 || t.locked || (stickyMinutesByTask.get(t.id) ?? 0) > 0);
