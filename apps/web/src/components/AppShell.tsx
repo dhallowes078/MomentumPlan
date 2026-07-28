@@ -22,7 +22,7 @@ const links = [
   { href: "/today", label: "Today", icon: SunMedium },
   { href: "/tasks", label: "Tasks", icon: CheckSquare },
   { href: "/calendar", label: "Calendar", icon: CalendarDays },
-  { href: "/settings", label: "More", icon: Settings2 },
+  { href: "/settings", label: "Settings", icon: Settings2 },
 ];
 
 function SyncBadge() {
@@ -130,7 +130,7 @@ function AppShellInner({
               }}
             >
               <Icon size={18} />
-              {label === "More" ? "Settings" : label}
+              {label}
             </Link>
           ))}
         </nav>

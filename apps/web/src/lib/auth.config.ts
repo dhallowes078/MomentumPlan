@@ -1,6 +1,11 @@
 import type { NextAuthConfig } from "next-auth";
 import Google from "next-auth/providers/google";
 import MicrosoftEntraID from "next-auth/providers/microsoft-entra-id";
+import {
+  googleAuthConfigured,
+  microsoftAuthConfigured,
+  runtimeEnv,
+} from "@/lib/runtime-env";
 
 const scopes = [
   "openid",
@@ -11,46 +16,47 @@ const scopes = [
   "Calendars.ReadWrite",
 ].join(" ");
 
-const microsoftConfigured = Boolean(
-  process.env.AUTH_MICROSOFT_ENTRA_ID_ID &&
-    process.env.AUTH_MICROSOFT_ENTRA_ID_SECRET
-);
+function buildProviders(): NextAuthConfig["providers"] {
+  const providers: NextAuthConfig["providers"] = [];
 
-const googleConfigured = Boolean(
-  process.env.AUTH_GOOGLE_ID && process.env.AUTH_GOOGLE_SECRET
-);
+  if (microsoftAuthConfigured()) {
+    providers.push(
+      MicrosoftEntraID({
+        clientId: runtimeEnv("AUTH_MICROSOFT_ENTRA_ID_ID")!,
+        clientSecret: runtimeEnv("AUTH_MICROSOFT_ENTRA_ID_SECRET")!,
+        issuer: runtimeEnv("AUTH_MICROSOFT_ENTRA_ID_ISSUER"),
+        authorization: {
+          params: {
+            scope: scopes,
+          },
+        },
+        allowDangerousEmailAccountLinking: true,
+      })
+    );
+  }
+
+  if (googleAuthConfigured()) {
+    providers.push(
+      Google({
+        clientId: runtimeEnv("AUTH_GOOGLE_ID")!,
+        clientSecret: runtimeEnv("AUTH_GOOGLE_SECRET")!,
+        allowDangerousEmailAccountLinking: true,
+      })
+    );
+  }
+
+  return providers;
+}
+
+export { buildProviders };
 
 /**
  * Edge-safe auth config used by middleware.
  * Local / device-code providers that need Prisma live in auth.ts only.
+ * Call buildProviders() when constructing NextAuth so Worker secrets are read at init.
  */
 export const authConfig = {
-  providers: [
-    ...(microsoftConfigured
-      ? [
-          MicrosoftEntraID({
-            clientId: process.env.AUTH_MICROSOFT_ENTRA_ID_ID!,
-            clientSecret: process.env.AUTH_MICROSOFT_ENTRA_ID_SECRET!,
-            issuer: process.env.AUTH_MICROSOFT_ENTRA_ID_ISSUER,
-            authorization: {
-              params: {
-                scope: scopes,
-              },
-            },
-            allowDangerousEmailAccountLinking: true,
-          }),
-        ]
-      : []),
-    ...(googleConfigured
-      ? [
-          Google({
-            clientId: process.env.AUTH_GOOGLE_ID!,
-            clientSecret: process.env.AUTH_GOOGLE_SECRET!,
-            allowDangerousEmailAccountLinking: true,
-          }),
-        ]
-      : []),
-  ],
+  providers: [],
   pages: {
     signIn: "/login",
   },

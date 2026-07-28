@@ -1,15 +1,17 @@
 import { signIn } from "@/lib/auth";
 import { DeviceCodeLogin } from "@/components/DeviceCodeLogin";
+import {
+  googleAuthConfigured,
+  microsoftAuthConfigured,
+  runtimeEnv,
+} from "@/lib/runtime-env";
+
+export const dynamic = "force-dynamic";
 
 export default function LoginPage() {
-  const localLoginEnabled = process.env.AUTH_ALLOW_LOCAL_LOGIN === "true";
-  const microsoftLoginEnabled = Boolean(
-    process.env.AUTH_MICROSOFT_ENTRA_ID_ID &&
-      process.env.AUTH_MICROSOFT_ENTRA_ID_SECRET
-  );
-  const googleLoginEnabled = Boolean(
-    process.env.AUTH_GOOGLE_ID && process.env.AUTH_GOOGLE_SECRET
-  );
+  const localLoginEnabled = runtimeEnv("AUTH_ALLOW_LOCAL_LOGIN") === "true";
+  const microsoftLoginEnabled = microsoftAuthConfigured();
+  const googleLoginEnabled = googleAuthConfigured();
 
   return (
     <div

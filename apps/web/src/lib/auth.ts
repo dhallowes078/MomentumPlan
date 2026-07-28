@@ -4,17 +4,18 @@ import { PrismaAdapter } from "@auth/prisma-adapter";
 import { randomUUID } from "crypto";
 import { prisma, getPrisma } from "@/lib/db";
 import { ensurePersonalWorkspace } from "@/lib/workspace";
-import { authConfig } from "@/lib/auth.config";
+import { authConfig, buildProviders } from "@/lib/auth.config";
 import { ensureAccessCode, normalizeAccessCode } from "@/lib/access-code";
+import { runtimeEnv } from "@/lib/runtime-env";
 
-const localLoginEnabled = process.env.AUTH_ALLOW_LOCAL_LOGIN === "true";
+const localLoginEnabled = runtimeEnv("AUTH_ALLOW_LOCAL_LOGIN") === "true";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
   adapter: PrismaAdapter(prisma),
   session: { strategy: "jwt" },
   providers: [
-    ...authConfig.providers,
+    ...buildProviders(),
     ...(localLoginEnabled
       ? [
           Credentials({

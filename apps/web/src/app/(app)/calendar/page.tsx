@@ -95,7 +95,6 @@ export default function CalendarPage() {
         },
       })),
       meetings,
-      outlookConnected: meetings.length > 0,
     }),
     [blocks, meetings]
   );
@@ -331,16 +330,6 @@ export default function CalendarPage() {
           Work hours only · tasks stack when times overlap.
         </p>
       </div>
-
-      {data && !data.outlookConnected && (
-        <div className="card" style={{ padding: "1rem" }}>
-          <strong>Outlook not connected yet.</strong>
-          <p style={{ margin: "0.4rem 0 0", color: "var(--ink-muted)" }}>
-            Scheduling still packs into work hours. Incomplete tasks are pushed forward instead of
-            marked missed.
-          </p>
-        </div>
-      )}
 
       {view === "horizontal" ? (
         <div className="cal-horizontal">

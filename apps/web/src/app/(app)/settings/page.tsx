@@ -733,33 +733,35 @@ export default function SettingsPage() {
         </span>
       </div>
 
-      <nav className="settings-menus" aria-label="Settings menus">
-        {SETTINGS_MENUS.map((menu) => (
-          <button
-            key={menu.id}
-            type="button"
-            className="settings-menu-btn"
-            data-active={activeMenu === menu.id ? "true" : "false"}
-            onClick={() => openMenu(menu.id)}
-          >
-            {menu.label}
-          </button>
-        ))}
-      </nav>
+      <div className="settings-chrome">
+        <nav className="settings-menus" aria-label="Settings menus">
+          {SETTINGS_MENUS.map((menu) => (
+            <button
+              key={menu.id}
+              type="button"
+              className="settings-menu-btn"
+              data-active={activeMenu === menu.id ? "true" : "false"}
+              onClick={() => openMenu(menu.id)}
+            >
+              {menu.label}
+            </button>
+          ))}
+        </nav>
 
-      <nav className="settings-tabs" aria-label="Settings sections">
-        {SETTINGS_MENUS.find((m) => m.id === activeMenu)?.sections.map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            className="settings-tab"
-            data-active={activeTab === tab.id ? "true" : "false"}
-            onClick={() => jumpTo(tab.id)}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </nav>
+        <nav className="settings-tabs" aria-label="Settings sections">
+          {SETTINGS_MENUS.find((m) => m.id === activeMenu)?.sections.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              className="settings-tab"
+              data-active={activeTab === tab.id ? "true" : "false"}
+              onClick={() => jumpTo(tab.id)}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </nav>
+      </div>
 
       {sectionVisible("profile") && profile && (
         <section

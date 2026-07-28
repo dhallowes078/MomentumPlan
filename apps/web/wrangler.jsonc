@@ -22,7 +22,8 @@
     "binding": "IMAGES"
   },
   "vars": {
-    "AUTH_ALLOW_LOCAL_LOGIN": "true"
+    "AUTH_ALLOW_LOCAL_LOGIN": "true",
+    "AUTH_GOOGLE_ID": "123261630661-kav23nm440lcleocp04eljh4ogn9t4av.apps.googleusercontent.com"
   },
   "d1_databases": [
     {
