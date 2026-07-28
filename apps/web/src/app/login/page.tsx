@@ -1,5 +1,6 @@
 import { signIn } from "@/lib/auth";
 import { DeviceCodeLogin } from "@/components/DeviceCodeLogin";
+import { OAuthSignInButton } from "@/components/OAuthSignInButton";
 import {
   googleAuthConfigured,
   microsoftAuthConfigured,
@@ -70,28 +71,10 @@ export default function LoginPage() {
               </form>
             )}
             {microsoftLoginEnabled && (
-              <form
-                action={async () => {
-                  "use server";
-                  await signIn("microsoft-entra-id", { redirectTo: "/today" });
-                }}
-              >
-                <button className="btn" type="submit" style={{ width: "100%" }}>
-                  Continue with Microsoft
-                </button>
-              </form>
+              <OAuthSignInButton provider="microsoft-entra-id" label="Continue with Microsoft" />
             )}
             {googleLoginEnabled && (
-              <form
-                action={async () => {
-                  "use server";
-                  await signIn("google", { redirectTo: "/today" });
-                }}
-              >
-                <button className="btn" type="submit" style={{ width: "100%" }}>
-                  Continue with Google
-                </button>
-              </form>
+              <OAuthSignInButton provider="google" label="Continue with Google" />
             )}
 
             <div
