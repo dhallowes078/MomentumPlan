@@ -1594,7 +1594,26 @@ export default function SettingsPage() {
       )}
 
       {activeMenu === "setup" && (
-        <button className="btn secondary" onClick={() => signOut({ callbackUrl: "/login" })}>
+        <button
+          className="btn secondary"
+          type="button"
+          onClick={() => {
+            void (async () => {
+              try {
+                await signOut({ redirect: false, callbackUrl: "/login" });
+              } catch {
+                // Auth.js may throw on redirect; still leave the session behind.
+              }
+              try {
+                const { setDeviceToken } = await import("@/lib/sync-api");
+                setDeviceToken(null);
+              } catch {
+                // ignore
+              }
+              window.location.assign("/login");
+            })();
+          }}
+        >
           Sign out
         </button>
       )}

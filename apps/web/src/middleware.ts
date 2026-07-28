@@ -29,7 +29,7 @@ export default auth((req) => {
   );
 
   // Device-token exchange and bearer-authenticated APIs skip cookie gate.
-  if (path.startsWith("/api/auth/device-token") || (path.startsWith("/api/") && hasBearer)) {
+  if (path.startsWith("/api/") && hasBearer) {
     return applyCors(NextResponse.next(), req);
   }
 
@@ -48,6 +48,14 @@ export default auth((req) => {
   return NextResponse.next();
 });
 
+/**
+ * Exclude Auth.js routes from this middleware.
+ * On Cloudflare Workers the auth() wrapper re-attaches the session cookie after
+ * sign-out clears it (blank Set-Cookie first, refreshed token second), so logout
+ * never sticks. Auth handlers + device-token manage their own CORS.
+ */
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"],
+  matcher: [
+    "/((?!_next/static|_next/image|favicon.ico|api/auth|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+  ],
 };
