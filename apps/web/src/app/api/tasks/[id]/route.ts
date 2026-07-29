@@ -277,6 +277,9 @@ export async function PATCH(
         recurCount: source.recurCount,
         recurOccurrencesDone: source.recurOccurrencesDone,
         dueAt: source.dueAt,
+        scheduledStart: source.scheduledStart,
+        scheduledEnd: source.scheduledEnd,
+        locked: source.locked,
       })
     ) {
       const next = buildNextOccurrenceFields({
@@ -288,6 +291,9 @@ export async function PATCH(
         recurCount: source.recurCount,
         recurOccurrencesDone: source.recurOccurrencesDone,
         dueAt: source.dueAt,
+        scheduledStart: source.scheduledStart,
+        scheduledEnd: source.scheduledEnd,
+        locked: source.locked,
       });
       await prisma.task.create({
         data: {
@@ -300,7 +306,10 @@ export async function PATCH(
           headerImageKey: source.headerImageKey,
           assigneeId: source.assigneeId,
           createdById: source.createdById,
-          allowSplit: source.allowSplit,
+          allowSplit: next.locked ? false : source.allowSplit,
+          locked: next.locked,
+          scheduledStart: next.scheduledStart,
+          scheduledEnd: next.scheduledEnd,
           isRecurring: true,
           recurFreq: source.recurFreq,
           recurInterval: source.recurInterval,

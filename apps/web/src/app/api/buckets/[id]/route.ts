@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { requireUser, jsonError } from "@/lib/api";
 import { assertWorkspaceAccess } from "@/lib/workspace";
 import { prisma } from "@/lib/db";
+import { parseDayHours, serializeDayHours } from "@/lib/day-hours";
 
 export async function PATCH(
   req: Request,
@@ -21,6 +23,16 @@ export async function PATCH(
   }
 
   const body = await req.json();
+  const clear = body.clearSchedule === true;
+  let dayHoursUpdate: Prisma.InputJsonValue | typeof Prisma.DbNull | undefined;
+  if (clear || body.dayHours === null) {
+    dayHoursUpdate = Prisma.DbNull;
+  } else if (body.dayHours && typeof body.dayHours === "object") {
+    const serialized = serializeDayHours(parseDayHours(body.dayHours));
+    dayHoursUpdate =
+      serialized === null ? Prisma.DbNull : (serialized as Prisma.InputJsonValue);
+  }
+
   const bucket = await prisma.bucket.update({
     where: { id },
     data: {
@@ -29,13 +41,14 @@ export async function PATCH(
         : {}),
       ...(typeof body.color === "string" ? { color: body.color } : {}),
       ...(typeof body.position === "number" ? { position: body.position } : {}),
-      ...(body.clearSchedule === true
+      ...(clear
         ? {
-            workDays: null,
+            workDays: Prisma.DbNull,
             startMinutes: null,
             endMinutes: null,
             breakStartMinutes: null,
             breakEndMinutes: null,
+            dayHours: Prisma.DbNull,
           }
         : {
             ...(Array.isArray(body.workDays) ? { workDays: body.workDays } : {}),
@@ -51,6 +64,7 @@ export async function PATCH(
             ...(body.breakEndMinutes === null || typeof body.breakEndMinutes === "number"
               ? { breakEndMinutes: body.breakEndMinutes }
               : {}),
+            ...(dayHoursUpdate !== undefined ? { dayHours: dayHoursUpdate } : {}),
           }),
     },
   });

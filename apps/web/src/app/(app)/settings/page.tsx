@@ -21,6 +21,12 @@ import {
 import { flushOutbox } from "@/lib/local/sync";
 import Link from "next/link";
 import { APP_VERSION } from "@/lib/version";
+import {
+  parseDayHours,
+  serializeDayHours,
+  type DayHoursMap,
+  type DayHoursValue,
+} from "@/lib/day-hours";
 
 type Prefs = {
   workDays: number[];
@@ -28,6 +34,7 @@ type Prefs = {
   endMinutes: number;
   breakStartMinutes: number | null;
   breakEndMinutes: number | null;
+  dayHours?: DayHoursMap | null;
   planningDays: number;
   minChunkMinutes: number;
   bufferMinutes: number;
@@ -53,6 +60,7 @@ type Bucket = {
   endMinutes?: number | null;
   breakStartMinutes?: number | null;
   breakEndMinutes?: number | null;
+  dayHours?: DayHoursMap | null;
 };
 
 type Workspace = {
@@ -185,6 +193,7 @@ export default function SettingsPage() {
       endMinutes: localPrefs.endMinutes,
       breakStartMinutes: localPrefs.breakStartMinutes,
       breakEndMinutes: localPrefs.breakEndMinutes,
+      dayHours: localPrefs.dayHours ?? null,
       planningDays: localPrefs.planningDays,
       minChunkMinutes: localPrefs.minChunkMinutes,
       bufferMinutes: localPrefs.bufferMinutes,
@@ -230,7 +239,12 @@ export default function SettingsPage() {
         fetch("/api/me/access-code").then((r) => (r.ok ? r.json() : null)),
         fetch("/api/integrations").then((r) => (r.ok ? r.json() : null)),
       ]);
-      if (p?.prefs) setPrefs(p.prefs);
+      if (p?.prefs) {
+        setPrefs({
+          ...p.prefs,
+          dayHours: parseDayHours(p.prefs.dayHours),
+        });
+      }
       if (w?.workspaces) setWorkspaces(w.workspaces);
       if (me?.user) setProfile(me.user);
       if (integ) setIntegrations(integ);
@@ -333,6 +347,7 @@ export default function SettingsPage() {
       endMinutes: payload.endMinutes,
       breakStartMinutes: payload.breakStartMinutes,
       breakEndMinutes: payload.breakEndMinutes,
+      dayHours: payload.dayHours ?? null,
       planningDays: payload.planningDays,
       minChunkMinutes: payload.minChunkMinutes,
       bufferMinutes: payload.bufferMinutes,
@@ -371,6 +386,7 @@ export default function SettingsPage() {
       endMinutes: bucket.endMinutes ?? prefs.endMinutes,
       breakStartMinutes: bucket.breakStartMinutes ?? prefs.breakStartMinutes,
       breakEndMinutes: bucket.breakEndMinutes ?? prefs.breakEndMinutes,
+      dayHours: serializeDayHours(parseDayHours(bucket.dayHours)),
     };
     await updateLocalBucketSchedule(activeWs, scheduleTarget, body);
     setWorkspaces((prev) =>
@@ -435,6 +451,7 @@ export default function SettingsPage() {
                       endMinutes: null,
                       breakStartMinutes: null,
                       breakEndMinutes: null,
+                      dayHours: null,
                     }
                   : b
               ),
@@ -1246,6 +1263,118 @@ export default function SettingsPage() {
                       </>
                     )}
                   </div>
+                  {workDays.length > 0 && (
+                    <div style={{ display: "grid", gap: "0.5rem" }}>
+                      <div>
+                        <div style={{ fontSize: "0.85rem", fontWeight: 600 }}>
+                          Hours by day
+                        </div>
+                        <p
+                          style={{
+                            margin: "0.2rem 0 0",
+                            color: "var(--ink-muted)",
+                            fontSize: "0.8rem",
+                          }}
+                        >
+                          Override specific days (e.g. more free time on weekends). Leave as the
+                          default above when a day should match.
+                        </p>
+                      </div>
+                      {workDays.map((dow) => {
+                        const dayMap: DayHoursMap =
+                          (bucket
+                            ? parseDayHours(bucket.dayHours)
+                            : parseDayHours(prefs.dayHours)) ?? {};
+                        const override = dayMap[dow];
+                        const dayStart = override?.startMinutes ?? startMinutes;
+                        const dayEnd = override?.endMinutes ?? endMinutes;
+                        const setDayHours = (next: DayHoursValue | null) => {
+                          const current =
+                            (bucket
+                              ? parseDayHours(bucket.dayHours)
+                              : parseDayHours(prefs.dayHours)) ?? {};
+                          const updated: DayHoursMap = { ...current };
+                          if (
+                            !next ||
+                            (next.startMinutes === startMinutes &&
+                              next.endMinutes === endMinutes &&
+                              (next.breakStartMinutes === undefined ||
+                                next.breakStartMinutes === breakStart) &&
+                              (next.breakEndMinutes === undefined ||
+                                next.breakEndMinutes === breakEnd))
+                          ) {
+                            delete updated[dow];
+                          } else {
+                            updated[dow] = next;
+                          }
+                          const serialized = serializeDayHours(updated);
+                          if (bucket) patchScheduleBucket({ dayHours: parseDayHours(serialized) });
+                          else setPrefs({ ...prefs, dayHours: parseDayHours(serialized) });
+                        };
+                        return (
+                          <div
+                            key={dow}
+                            style={{
+                              display: "grid",
+                              gridTemplateColumns: "3.5rem 1fr 1fr auto",
+                              gap: "0.4rem",
+                              alignItems: "end",
+                            }}
+                          >
+                            <span
+                              style={{
+                                fontSize: "0.85rem",
+                                fontWeight: 600,
+                                paddingBottom: "0.55rem",
+                              }}
+                            >
+                              {DAY_LABELS[dow]}
+                            </span>
+                            <label style={{ display: "grid", gap: "0.2rem", fontSize: "0.75rem" }}>
+                              Start
+                              <input
+                                className="field"
+                                type="time"
+                                value={minutesToInput(dayStart)}
+                                onChange={(e) => {
+                                  const v = inputToMinutes(e.target.value);
+                                  setDayHours({
+                                    startMinutes: v,
+                                    endMinutes: dayEnd,
+                                  });
+                                }}
+                              />
+                            </label>
+                            <label style={{ display: "grid", gap: "0.2rem", fontSize: "0.75rem" }}>
+                              End
+                              <input
+                                className="field"
+                                type="time"
+                                value={minutesToInput(dayEnd)}
+                                onChange={(e) => {
+                                  const v = inputToMinutes(e.target.value);
+                                  setDayHours({
+                                    startMinutes: dayStart,
+                                    endMinutes: v,
+                                  });
+                                }}
+                              />
+                            </label>
+                            <button
+                              type="button"
+                              className="btn secondary"
+                              style={{ fontSize: "0.75rem", padding: "0.45rem 0.55rem" }}
+                              disabled={!override}
+                              onClick={() => setDayHours(null)}
+                              title="Use default hours"
+                            >
+                              Default
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </>
               );
             })()}
@@ -1615,6 +1744,11 @@ export default function SettingsPage() {
           }}
         >
           Sign out
+          {profile?.email && !profile.email.endsWith("@momentum.local") && profile.email !== "local@device"
+            ? ` · ${profile.email}`
+            : profile?.name
+              ? ` · ${profile.name}`
+              : ""}
         </button>
       )}
     </div>

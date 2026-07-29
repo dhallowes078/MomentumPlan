@@ -10,6 +10,17 @@ export type LocalBucket = {
   endMinutes?: number | null;
   breakStartMinutes?: number | null;
   breakEndMinutes?: number | null;
+  dayHours?: Partial<
+    Record<
+      number,
+      {
+        startMinutes: number;
+        endMinutes: number;
+        breakStartMinutes?: number | null;
+        breakEndMinutes?: number | null;
+      }
+    >
+  > | null;
 };
 
 export type LocalTask = {
@@ -76,6 +87,17 @@ export type LocalPrefs = {
   endMinutes: number;
   breakStartMinutes: number | null;
   breakEndMinutes: number | null;
+  dayHours?: Partial<
+    Record<
+      number,
+      {
+        startMinutes: number;
+        endMinutes: number;
+        breakStartMinutes?: number | null;
+        breakEndMinutes?: number | null;
+      }
+    >
+  > | null;
   planningDays: number;
   minChunkMinutes: number;
   bufferMinutes: number;

@@ -127,6 +127,8 @@ model Bucket {
   endMinutes        Int?
   breakStartMinutes Int?
   breakEndMinutes   Int?
+  /** Optional per-day hour overrides: { "0": { startMinutes, endMinutes, ... }, ... } */
+  dayHours          Json?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -328,6 +330,8 @@ model SchedulePrefs {
   endMinutes        Int     @default(1020)
   breakStartMinutes Int?    @default(720)
   breakEndMinutes   Int?    @default(780)
+  /** Optional per-day hour overrides: { "0": { startMinutes, endMinutes, ... }, ... } */
+  dayHours          Json?
   planningDays      Int     @default(14)
   minChunkMinutes   Int     @default(25)
   bufferMinutes     Int     @default(5)

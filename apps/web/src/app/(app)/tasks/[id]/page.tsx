@@ -734,7 +734,9 @@ export default function TaskDetailPage() {
                 checked={draft.isRecurring}
                 onChange={(e) => updateDraft({ isRecurring: e.target.checked })}
               />
-              <span style={{ fontSize: "0.9rem", fontWeight: 600 }}>Recurring task</span>
+              <span style={{ fontSize: "0.9rem", fontWeight: 600 }}>
+                {draft.locked ? "Recurring event" : "Recurring task"}
+              </span>
             </label>
             {draft.isRecurring && (
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem" }}>

@@ -295,15 +295,15 @@ export function NewTaskModal({
       scheduledStart: lockedStart,
       scheduledEnd: lockedEnd,
       links: mode === "full" && links.length ? links : undefined,
-      isRecurring: !isEvent && mode === "full" ? isRecurring : false,
-      recurFreq: !isEvent && mode === "full" && isRecurring ? recurFreq : null,
-      recurInterval: !isEvent && mode === "full" && isRecurring ? recurInterval : 1,
+      isRecurring: isEvent || mode === "full" ? isRecurring : false,
+      recurFreq: (isEvent || mode === "full") && isRecurring ? recurFreq : null,
+      recurInterval: (isEvent || mode === "full") && isRecurring ? recurInterval : 1,
       recurEndsAt:
-        !isEvent && mode === "full" && isRecurring && recurEndsAt
+        (isEvent || mode === "full") && isRecurring && recurEndsAt
           ? new Date(`${recurEndsAt}T23:59:59`).toISOString()
           : null,
       recurCount:
-        !isEvent && mode === "full" && isRecurring && recurCount ? Number(recurCount) : null,
+        (isEvent || mode === "full") && isRecurring && recurCount ? Number(recurCount) : null,
       checklist: mode === "full" ? checklist.filter((c) => c.text.trim()) : undefined,
       mentionIds: mode === "full" && mentionIds.length ? mentionIds : undefined,
     });
@@ -667,7 +667,6 @@ export function NewTaskModal({
                 </label>
               )}
 
-              {!isEvent && (
               <div style={{ display: "grid", gap: "0.5rem" }}>
                 <label style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
                   <input
@@ -675,7 +674,9 @@ export function NewTaskModal({
                     checked={isRecurring}
                     onChange={(e) => setIsRecurring(e.target.checked)}
                   />
-                  <span style={{ fontSize: "0.9rem", fontWeight: 600 }}>Recurring task</span>
+                  <span style={{ fontSize: "0.9rem", fontWeight: 600 }}>
+                    {isEvent ? "Recurring event" : "Recurring task"}
+                  </span>
                 </label>
                 {isRecurring && (
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem" }}>
@@ -726,7 +727,6 @@ export function NewTaskModal({
                   </div>
                 )}
               </div>
-              )}
 
               <div style={{ display: "grid", gap: "0.5rem" }}>
                 <div style={{ fontSize: "0.85rem", fontWeight: 600 }}>Checklist</div>

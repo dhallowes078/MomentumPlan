@@ -19,6 +19,14 @@ export type SchedulableTask = {
   workHours?: WorkHours | null;
 };
 
+/** Hours for a single weekday; used as a per-day override. */
+export type DayHours = {
+  startMinutes: number;
+  endMinutes: number;
+  breakStartMinutes?: number | null;
+  breakEndMinutes?: number | null;
+};
+
 export type WorkHours = {
   /** 0 = Sunday … 6 = Saturday */
   days: number[];
@@ -27,8 +35,38 @@ export type WorkHours = {
   /** Optional lunch break within work day */
   breakStartMinutes?: number | null;
   breakEndMinutes?: number | null;
+  /**
+   * Optional per-day overrides (keys 0–6). Days without an entry use the
+   * default start/end/break on this WorkHours object.
+   */
+  dayHours?: Partial<Record<number, DayHours>> | null;
   timezone?: string;
 };
+
+/** Resolve start/end/break for a given day of week. */
+export function hoursForDay(workHours: WorkHours, dow: number): DayHours {
+  const override = workHours.dayHours?.[dow];
+  if (!override) {
+    return {
+      startMinutes: workHours.startMinutes,
+      endMinutes: workHours.endMinutes,
+      breakStartMinutes: workHours.breakStartMinutes,
+      breakEndMinutes: workHours.breakEndMinutes,
+    };
+  }
+  return {
+    startMinutes: override.startMinutes,
+    endMinutes: override.endMinutes,
+    breakStartMinutes:
+      override.breakStartMinutes !== undefined
+        ? override.breakStartMinutes
+        : workHours.breakStartMinutes,
+    breakEndMinutes:
+      override.breakEndMinutes !== undefined
+        ? override.breakEndMinutes
+        : workHours.breakEndMinutes,
+  };
+}
 
 export type SchedulerPrefs = {
   workHours: WorkHours;
@@ -143,21 +181,22 @@ export function freeSlots(
   while (day <= endDay) {
     const dow = day.getDay();
     if (workHours.days.includes(dow)) {
-      const dayStart = atMinutes(day, workHours.startMinutes);
-      const dayEnd = atMinutes(day, workHours.endMinutes);
+      const hours = hoursForDay(workHours, dow);
+      const dayStart = atMinutes(day, hours.startMinutes);
+      const dayEnd = atMinutes(day, hours.endMinutes);
       const windows: BusyBlock[] = [];
 
       if (
-        workHours.breakStartMinutes != null &&
-        workHours.breakEndMinutes != null &&
-        workHours.breakStartMinutes < workHours.breakEndMinutes
+        hours.breakStartMinutes != null &&
+        hours.breakEndMinutes != null &&
+        hours.breakStartMinutes < hours.breakEndMinutes
       ) {
         windows.push({
           start: dayStart,
-          end: atMinutes(day, workHours.breakStartMinutes),
+          end: atMinutes(day, hours.breakStartMinutes),
         });
         windows.push({
-          start: atMinutes(day, workHours.breakEndMinutes),
+          start: atMinutes(day, hours.breakEndMinutes),
           end: dayEnd,
         });
       } else {
@@ -324,6 +363,10 @@ function mergeWorkHours(base: WorkHours, override?: WorkHours | null): WorkHours
         : base.breakStartMinutes,
     breakEndMinutes:
       override.breakEndMinutes !== undefined ? override.breakEndMinutes : base.breakEndMinutes,
+    dayHours:
+      override.dayHours !== undefined && override.dayHours !== null
+        ? override.dayHours
+        : base.dayHours,
     timezone: override.timezone ?? base.timezone,
   };
 }

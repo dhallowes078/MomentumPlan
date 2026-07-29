@@ -7,6 +7,7 @@ import {
 } from "@momentum/scheduler";
 import { localDb, type LocalScheduleBlock } from "./db";
 import * as repo from "./repo";
+import { parseDayHours } from "@/lib/day-hours";
 
 /** Pack open tasks into Dexie schedule blocks on-device (no server required). */
 export async function runLocalScheduler() {
@@ -18,6 +19,7 @@ export async function runLocalScheduler() {
       endMinutes: prefsRow.endMinutes ?? 1020,
       breakStartMinutes: prefsRow.breakStartMinutes,
       breakEndMinutes: prefsRow.breakEndMinutes,
+      dayHours: prefsRow.dayHours ?? null,
       timezone: prefsRow.timezone,
     },
     planningDays: prefsRow.planningDays ?? 14,
@@ -37,13 +39,15 @@ export async function runLocalScheduler() {
   const schedulable: SchedulableTask[] = tasks.map((t) => {
     const bucket =
       t.bucket ?? (t.bucketId ? bucketById.get(t.bucketId) ?? null : null);
+    const bucketDayHours = parseDayHours(bucket?.dayHours);
     const hasBucketHours =
       bucket &&
       (bucket.startMinutes != null ||
         bucket.endMinutes != null ||
         (Array.isArray(bucket.workDays) && bucket.workDays.length > 0) ||
         bucket.breakStartMinutes != null ||
-        bucket.breakEndMinutes != null);
+        bucket.breakEndMinutes != null ||
+        bucketDayHours != null);
     return {
       id: t.id,
       priority: t.priority,
@@ -71,6 +75,7 @@ export async function runLocalScheduler() {
               bucket.breakEndMinutes !== undefined
                 ? bucket.breakEndMinutes
                 : prefs.workHours.breakEndMinutes,
+            dayHours: bucketDayHours ?? prefs.workHours.dayHours ?? null,
           }
         : null,
     };

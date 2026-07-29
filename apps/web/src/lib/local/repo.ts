@@ -1,6 +1,7 @@
 import { v4 as uuid } from "uuid";
 import {
   localDb,
+  type LocalBucket,
   type LocalPrefs,
   type LocalScheduleBlock,
   type LocalTask,
@@ -15,6 +16,7 @@ const DEFAULT_PREFS: LocalPrefs = {
   endMinutes: 1020,
   breakStartMinutes: 720,
   breakEndMinutes: 780,
+  dayHours: null,
   planningDays: 14,
   minChunkMinutes: 25,
   bufferMinutes: 5,
@@ -95,6 +97,7 @@ export async function updateLocalBucketSchedule(
     endMinutes?: number | null;
     breakStartMinutes?: number | null;
     breakEndMinutes?: number | null;
+    dayHours?: LocalBucket["dayHours"];
   } | null
 ) {
   const ws = await getWorkspace(workspaceId);
@@ -112,6 +115,7 @@ export async function updateLocalBucketSchedule(
               endMinutes: null,
               breakStartMinutes: null,
               breakEndMinutes: null,
+              dayHours: null,
             }
         : b
     ),

@@ -13,6 +13,7 @@ import {
   upsertTaskEvent,
 } from "@/lib/graph";
 import { addDays } from "date-fns";
+import { parseDayHours } from "@/lib/day-hours";
 
 const MS_PER_MIN = 60_000;
 
@@ -29,6 +30,7 @@ async function loadPrefs(userId: string): Promise<SchedulerPrefs> {
       endMinutes: row.endMinutes,
       breakStartMinutes: row.breakStartMinutes,
       breakEndMinutes: row.breakEndMinutes,
+      dayHours: parseDayHours(row.dayHours),
       timezone: row.timezone,
     },
     planningDays: row.planningDays,
@@ -157,13 +159,15 @@ export async function runSchedulerForUser(userId: string) {
       const bucketDays = Array.isArray(bucket?.workDays)
         ? (bucket!.workDays as number[])
         : null;
+      const bucketDayHours = parseDayHours(bucket?.dayHours);
       const hasBucketHours =
         bucket &&
         (bucket.startMinutes != null ||
           bucket.endMinutes != null ||
           (bucketDays && bucketDays.length > 0) ||
           bucket.breakStartMinutes != null ||
-          bucket.breakEndMinutes != null);
+          bucket.breakEndMinutes != null ||
+          bucketDayHours != null);
       return {
         id: t.id,
         priority: t.priority,
@@ -188,6 +192,7 @@ export async function runSchedulerForUser(userId: string) {
                 bucket!.breakEndMinutes !== undefined
                   ? bucket!.breakEndMinutes
                   : prefs.workHours.breakEndMinutes,
+              dayHours: bucketDayHours ?? prefs.workHours.dayHours ?? null,
             }
           : null,
       };

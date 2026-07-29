@@ -2,6 +2,7 @@ import { startOfDay, endOfDay } from "date-fns";
 import { localDb, setMeta, type LocalTask, type LocalWorkspace } from "./db";
 import * as repo from "./repo";
 import { apiFetch, apiUrl, getDeviceToken, getSyncApiBase } from "@/lib/sync-api";
+import { parseDayHours } from "@/lib/day-hours";
 
 export type SyncStatus = "idle" | "syncing" | "offline" | "error";
 
@@ -135,7 +136,10 @@ export async function pullFromServer() {
       workspaces.push({
         id: detail.workspace.id,
         name: detail.workspace.name,
-        buckets: detail.workspace.buckets ?? [],
+        buckets: (detail.workspace.buckets ?? []).map((b) => ({
+          ...b,
+          dayHours: parseDayHours(b.dayHours),
+        })),
         members: (detail.workspace.members ?? []).map((m) => m.user),
       });
     } else {
@@ -251,6 +255,20 @@ export async function pullFromServer() {
         endMinutes: Number(p.endMinutes ?? 1020),
         breakStartMinutes: (p.breakStartMinutes as number | null) ?? null,
         breakEndMinutes: (p.breakEndMinutes as number | null) ?? null,
+        dayHours: (() => {
+          const raw = p.dayHours;
+          if (!raw || typeof raw !== "object") return null;
+          const out: Record<number, { startMinutes: number; endMinutes: number }> = {};
+          for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+            const dow = Number(k);
+            if (!Number.isInteger(dow) || !v || typeof v !== "object") continue;
+            const hours = v as { startMinutes?: number; endMinutes?: number };
+            if (typeof hours.startMinutes === "number" && typeof hours.endMinutes === "number") {
+              out[dow] = { startMinutes: hours.startMinutes, endMinutes: hours.endMinutes };
+            }
+          }
+          return Object.keys(out).length ? out : null;
+        })(),
         planningDays: Number(p.planningDays ?? 14),
         minChunkMinutes: Number(p.minChunkMinutes ?? 25),
         bufferMinutes: Number(p.bufferMinutes ?? 5),
