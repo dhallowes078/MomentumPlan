@@ -14,6 +14,14 @@ export type ChangelogEntry = {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.3.4",
+    date: "2026-07-30",
+    changes: [
+      "Fixed Sync issue 403 Forbidden — offline local-workspace ids now remap to your real workspace before upload",
+      "Pending buckets/tasks created before linking survive the first sync",
+    ],
+  },
+  {
     version: "0.3.3",
     date: "2026-07-30",
     changes: [

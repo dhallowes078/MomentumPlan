@@ -51,8 +51,64 @@ function syncFailMessage(kind: string, res: Response, body: unknown) {
       ? String((body as { error: string }).error)
       : "";
   // Keep short — shown in Sync issue dialog.
-  const clipped = detail.length > 160 ? `${detail.slice(0, 157)}…` : detail;
+  let clipped = detail.length > 160 ? `${detail.slice(0, 157)}…` : detail;
+  if (res.status === 403) {
+    clipped =
+      clipped && clipped.toLowerCase() !== "forbidden"
+        ? clipped
+        : "No access to that workspace — often a leftover offline id. Sync will remap; or re-link device.";
+  }
   return clipped ? `${kind} ${res.status}: ${clipped}` : `${kind} ${res.status}`;
+}
+
+/** Prefer a real server workspace over offline seeds like `local-workspace`. */
+async function canonicalWorkspaceId(preferred?: string | null): Promise<string | null> {
+  const workspaces = await localDb.workspaces.toArray();
+  const server = workspaces.filter((w) => !w.id.startsWith("local"));
+  if (preferred && server.some((w) => w.id === preferred)) return preferred;
+  return server[0]?.id ?? null;
+}
+
+/**
+ * After linking / pull: rewrite offline workspace ids on tasks + outbox so
+ * create/patch stop getting 403 Forbidden against `local-workspace`.
+ */
+async function migrateOfflineWorkspaceRefs(targetWorkspaceId: string) {
+  const offlineIds = new Set(
+    (await localDb.workspaces.toArray())
+      .map((w) => w.id)
+      .filter((id) => id.startsWith("local"))
+  );
+  // Also migrate tasks/outbox still pointing at local-* even if that row was cleared.
+  offlineIds.add("local-workspace");
+
+  const tasks = await localDb.tasks.toArray();
+  for (const t of tasks) {
+    if (!offlineIds.has(t.workspaceId) && !t.workspaceId.startsWith("local")) continue;
+    await localDb.tasks.put({ ...t, workspaceId: targetWorkspaceId });
+  }
+
+  const outbox = await localDb.outbox.toArray();
+  for (const row of outbox) {
+    const op = row.op;
+    if (op.type === "createTask") {
+      const ws = String(op.body.workspaceId ?? "");
+      if (!ws.startsWith("local") && !offlineIds.has(ws)) continue;
+      await localDb.outbox.put({
+        ...row,
+        op: {
+          ...op,
+          body: { ...op.body, workspaceId: targetWorkspaceId },
+        },
+      });
+    } else if (op.type === "createBucket") {
+      if (!op.workspaceId.startsWith("local") && !offlineIds.has(op.workspaceId)) continue;
+      await localDb.outbox.put({
+        ...row,
+        op: { ...op, workspaceId: targetWorkspaceId },
+      });
+    }
+  }
 }
 
 /** Normalize createTask outbox payloads so Zod/API won't 400 on nulls / local ids. */
@@ -189,6 +245,13 @@ export async function pullFromServer() {
 
   const existingWorkspaces = await localDb.workspaces.toArray();
   const existingById = new Map(existingWorkspaces.map((w) => [w.id, w]));
+  // Preserve unsynced buckets from offline / previous workspace rows.
+  const pendingLocalBuckets = existingWorkspaces.flatMap((w) =>
+    (w.buckets ?? []).filter(
+      (b) => b.id.startsWith("local_bucket_") || b.id.startsWith("local-")
+    )
+  );
+  const pendingById = new Map(pendingLocalBuckets.map((b) => [b.id, b]));
 
   const workspaces: LocalWorkspace[] = [];
   for (const w of wsPayload.workspaces) {
@@ -206,9 +269,12 @@ export async function pullFromServer() {
         ...b,
         dayHours: parseDayHours(b.dayHours),
       }));
+      const serverIds = new Set(serverBuckets.map((b) => b.id));
       // Keep unsynced local buckets until createBucket outbox remaps them.
-      const pendingLocal = (prev?.buckets ?? []).filter((b) =>
-        b.id.startsWith("local_bucket_")
+      const pendingLocal = (prev?.buckets ?? []).filter(
+        (b) =>
+          (b.id.startsWith("local_bucket_") || b.id.startsWith("local-")) &&
+          !serverIds.has(b.id)
       );
       workspaces.push({
         id: detail.workspace.id,
@@ -228,8 +294,29 @@ export async function pullFromServer() {
       });
     }
   }
+
+  // Attach any leftover offline buckets to the first server workspace.
+  if (workspaces[0] && pendingById.size) {
+    const attached = new Set(workspaces.flatMap((w) => (w.buckets ?? []).map((b) => b.id)));
+    const extras = [...pendingById.values()].filter((b) => !attached.has(b.id));
+    if (extras.length) {
+      workspaces[0] = {
+        ...workspaces[0],
+        buckets: [
+          ...workspaces[0].buckets,
+          ...extras.map((b) => ({ ...b, workspaceId: workspaces[0].id })),
+        ],
+      };
+    }
+  }
+
   await localDb.workspaces.clear();
   await localDb.workspaces.bulkPut(workspaces);
+
+  // Rewrite local-workspace refs before task reconcile / flush.
+  if (workspaces[0] && !workspaces[0].id.startsWith("local")) {
+    await migrateOfflineWorkspaceRefs(workspaces[0].id);
+  }
 
   const pendingCreates = await localDb.tasks.filter((t) => Boolean(t._localOnly)).toArray();
   const pendingIds = new Set(pendingCreates.map((t) => t.id));
@@ -487,6 +574,42 @@ export async function flushOutbox() {
   flushing = true;
   setStatus("syncing");
   try {
+    // If outbox still targets offline workspace ids, fetch memberships and remap
+    // before POSTs (avoids create/createBucket 403 Forbidden).
+    const early = await localDb.outbox.toArray();
+    const needsWsRemap = early.some((row) => {
+      if (row.op.type === "createTask") {
+        return String(row.op.body.workspaceId ?? "").startsWith("local");
+      }
+      if (row.op.type === "createBucket") {
+        return row.op.workspaceId.startsWith("local");
+      }
+      return false;
+    });
+    const hasServerWs = (await localDb.workspaces.toArray()).some(
+      (w) => !w.id.startsWith("local")
+    );
+    if (needsWsRemap || !hasServerWs) {
+      const wsPayload = await safeJson<{ workspaces: { id: string; name: string }[] }>(
+        "/api/workspaces"
+      );
+      if (wsPayload?.workspaces?.length) {
+        for (const w of wsPayload.workspaces) {
+          const existing = await localDb.workspaces.get(w.id);
+          if (!existing) {
+            await localDb.workspaces.put({
+              id: w.id,
+              name: w.name,
+              buckets: [],
+              members: [],
+            });
+          }
+        }
+        const target = wsPayload.workspaces[0].id;
+        await migrateOfflineWorkspaceRefs(target);
+      }
+    }
+
     // Prefer createBucket before task ops so local_bucket_* ids remap first.
     const items = (await localDb.outbox.orderBy("createdAt").toArray()).sort((a, b) => {
       const rank = (t: string) => (t === "createBucket" ? 0 : t === "createTask" ? 1 : 2);
@@ -498,6 +621,22 @@ export async function flushOutbox() {
         const op = item.op;
         if (op.type === "createTask") {
           const body = sanitizeCreateTaskBody(op.body);
+          const wsId = await canonicalWorkspaceId(String(body.workspaceId ?? ""));
+          if (!wsId) {
+            throw new Error("create blocked: no server workspace yet — pull to refresh");
+          }
+          body.workspaceId = wsId;
+          // Persist remap so retries don't keep the offline id.
+          if (op.body.workspaceId !== wsId) {
+            await localDb.outbox.put({
+              ...item,
+              op: { ...op, body: { ...op.body, workspaceId: wsId } },
+            });
+            const local = await localDb.tasks.get(op.localId);
+            if (local && local.workspaceId !== wsId) {
+              await localDb.tasks.put({ ...local, workspaceId: wsId });
+            }
+          }
           // If bucket still local-only, wait until createBucket remaps (don't burn retries).
           if (
             typeof op.body.bucketId === "string" &&
@@ -583,10 +722,20 @@ export async function flushOutbox() {
             throw new Error(syncFailMessage("delete", res, errBody));
           }
         } else if (op.type === "createBucket") {
+          const wsId = await canonicalWorkspaceId(op.workspaceId);
+          if (!wsId) {
+            throw new Error("createBucket blocked: no server workspace yet — pull to refresh");
+          }
+          if (op.workspaceId !== wsId) {
+            await localDb.outbox.put({
+              ...item,
+              op: { ...op, workspaceId: wsId },
+            });
+          }
           const res = await apiFetch("/api/buckets", {
             method: "POST",
             body: JSON.stringify({
-              workspaceId: op.workspaceId,
+              workspaceId: wsId,
               name: op.name,
               color: op.color,
             }),
@@ -598,7 +747,7 @@ export async function flushOutbox() {
           const data = await res.json();
           const serverId = data.bucket?.id as string | undefined;
           if (serverId) {
-            const ws = await localDb.workspaces.get(op.workspaceId);
+            const ws = await localDb.workspaces.get(wsId);
             if (ws) {
               await localDb.workspaces.put({
                 ...ws,
@@ -695,6 +844,10 @@ export async function flushOutbox() {
 
 /** Push local outbox, pull server state, then push again (e.g. after ID remap). */
 export async function saveAndSync() {
+  if (canSyncRemote()) {
+    // Remap offline workspace ids before attempting creates (prevents 403).
+    await pullFromServer();
+  }
   await flushOutbox();
   try {
     const { runLocalScheduler } = await import("./scheduler");
@@ -715,8 +868,8 @@ export async function bootLocalSync() {
     emit();
     await repo.ensureOfflineWorkspace();
     if (canSyncRemote()) {
-      // Push local prefs/theme (and other outbox ops) before pull so a
-      // stale server snapshot does not wipe appearance on boot.
+      // Pull first so offline `local-workspace` ids remap before create flush (403 otherwise).
+      await pullFromServer();
       await flushOutbox();
       await pullFromServer();
       await flushOutbox();
