@@ -26,7 +26,7 @@ const links = [
 ];
 
 function SyncBadge() {
-  const { status, pending, refresh } = useSync();
+  const { status, pending, lastError, refresh } = useSync();
   const label =
     status === "offline"
       ? "Offline"
@@ -37,13 +37,31 @@ function SyncBadge() {
           : pending > 0
             ? `${pending} pending`
             : "Synced";
+
+  async function onTap() {
+    if (status === "error" && lastError) {
+      const retry = window.confirm(
+        `Sync issue\n\n${lastError}\n\nTap OK to retry sync now.\n(Screenshot this message if it keeps failing.)`
+      );
+      if (!retry) return;
+    }
+    await refresh();
+  }
+
   return (
     <button
       type="button"
       className="btn ghost compact"
-      title="Sync with cloud"
-      onClick={() => void refresh()}
-      style={{ fontSize: "0.72rem", color: "var(--ink-muted)" }}
+      title={
+        status === "error" && lastError
+          ? `Sync issue: ${lastError}`
+          : "Sync with cloud"
+      }
+      onClick={() => void onTap()}
+      style={{
+        fontSize: "0.72rem",
+        color: status === "error" ? "var(--danger, #b45309)" : "var(--ink-muted)",
+      }}
     >
       {status === "offline" || status === "error" ? <CloudOff size={14} /> : <Cloud size={14} />}
       {label}
@@ -70,11 +88,8 @@ function AppShellInner({
     void import("@/lib/local/notifications")
       .then((m) => m.initNotifications())
       .catch(() => undefined);
-    // Pack on the client / when user explicitly syncs — avoid hammering the Worker.
-    const id = window.setInterval(() => {
-      void fetch("/api/schedule/run", { method: "POST" }).catch(() => undefined);
-    }, 30 * 60_000);
-    return () => window.clearInterval(id);
+    // Avoid hammering the Worker schedule packer — it causes Error 1101 under load.
+    // Packing runs locally on save; remote pack is fire-and-forget from saveAndSync.
   }, []);
 
   return (

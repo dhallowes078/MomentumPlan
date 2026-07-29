@@ -38,6 +38,10 @@ export function BucketSelect({
         style={{ paddingLeft: selected || allowNone ? "1.85rem" : undefined }}
       >
         {allowNone && <option value="">None</option>}
+        {/* Keep a selection visible if the id was wiped from the list mid-sync. */}
+        {value && !selected && (
+          <option value={value}>Unknown bucket</option>
+        )}
         {buckets.map((b) => (
           <option key={b.id} value={b.id}>
             {b.name}

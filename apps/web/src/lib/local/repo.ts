@@ -72,6 +72,13 @@ export async function createLocalBucket(workspaceId: string, name: string, color
   };
   const buckets = [...(ws.buckets ?? []), bucket];
   await localDb.workspaces.put({ ...ws, id: workspaceId, buckets });
+  await enqueue({
+    type: "createBucket",
+    localId: bucket.id,
+    workspaceId,
+    name: bucket.name,
+    color: bucket.color,
+  });
   return bucket;
 }
 
@@ -145,17 +152,30 @@ export async function upsertTask(task: LocalTask) {
 export async function patchLocalTask(id: string, patch: Partial<LocalTask>, syncBody?: Record<string, unknown>) {
   const existing = await localDb.tasks.get(id);
   if (!existing) return;
+  let bucket = existing.bucket;
+  if ("bucketId" in patch) {
+    if (patch.bucketId) {
+      const ws = await localDb.workspaces.get(existing.workspaceId);
+      bucket =
+        ws?.buckets?.find((b) => b.id === patch.bucketId) ??
+        (patch.bucket !== undefined ? patch.bucket : existing.bucket) ??
+        null;
+    } else {
+      bucket = null;
+    }
+  } else if (patch.bucket !== undefined) {
+    bucket = patch.bucket;
+  }
   const next: LocalTask = {
     ...existing,
     ...patch,
+    bucket,
     updatedAt: new Date().toISOString(),
   };
   await localDb.tasks.put(next);
   if (syncBody) {
     await enqueue({ type: "patchTask", taskId: id, body: syncBody });
   }
-  // Keep calendar/today in sync with local changes even when offline.
-  await enqueue({ type: "runScheduler" });
   return next;
 }
 
@@ -241,14 +261,13 @@ export async function createLocalTask(input: {
       isRecurring: input.isRecurring ?? false,
       recurFreq: input.recurFreq ?? null,
       recurInterval: input.recurInterval ?? 1,
-      recurByWeekdays: input.recurByWeekdays ?? null,
+      ...(input.recurByWeekdays?.length ? { recurByWeekdays: input.recurByWeekdays } : {}),
       recurEndsAt: input.recurEndsAt ?? null,
       recurCount: input.recurCount ?? null,
     },
     checklist: input.checklist,
     mentionIds: input.mentionIds,
   });
-  await enqueue({ type: "runScheduler" });
   return task;
 }
 
@@ -273,7 +292,6 @@ export async function deleteLocalTask(taskId: string) {
   if (!taskId.startsWith("local_")) {
     await enqueue({ type: "deleteTask", taskId });
   }
-  await enqueue({ type: "runScheduler" });
 }
 
 export async function listScheduleBlocks(): Promise<LocalScheduleBlock[]> {

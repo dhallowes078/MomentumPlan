@@ -1,0 +1,34 @@
+---
+description: Bump app version and changelog on every shipped update
+alwaysApply: true
+---
+
+# Always bump version + changelog
+
+Whenever you ship a **user-facing** update (web deploy and/or APK rebuild — UI, sync, auth, scheduler, settings, etc.):
+
+1. Open `apps/web/src/lib/version.ts`.
+2. **Prepend** a new entry at the top of `CHANGELOG` with:
+   - Bumped `version` (semver: patch for fixes, minor for features)
+   - Today's date as `YYYY-MM-DD`
+   - Short bullet `changes` the user will notice (1–8 lines, plain language)
+3. `APP_VERSION` is derived from `CHANGELOG[0]` — do not set it separately.
+4. Then deploy / rebuild APK as usual.
+
+## Exceptions
+
+- Pure docs, rules, comments, or agent-only files with no runtime effect: skip.
+- If the same conversation already bumped for this ship, do not bump twice.
+
+## Example entry
+
+```ts
+{
+  version: "0.3.1",
+  date: "2026-07-30",
+  changes: [
+    "Fixed calendar ghost tasks after delete",
+    "Weekly recurrence: pick Mon/Wed/Fri",
+  ],
+},
+```

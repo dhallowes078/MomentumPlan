@@ -18,9 +18,9 @@ import {
   requestNotificationPermission,
   rescheduleTaskNotifications,
 } from "@/lib/local/notifications";
-import { flushOutbox } from "@/lib/local/sync";
+import { flushOutbox, saveAndSync } from "@/lib/local/sync";
 import Link from "next/link";
-import { APP_VERSION } from "@/lib/version";
+import { VersionChangelogButton } from "@/components/VersionChangelogButton";
 import {
   parseDayHours,
   serializeDayHours,
@@ -544,41 +544,8 @@ export default function SettingsPage() {
     if (!activeWs || !bucketName.trim()) return;
     const name = bucketName.trim();
     const color = bucketColor;
-    try {
-      const res = await fetch("/api/buckets", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ workspaceId: activeWs, name, color }),
-      });
-      if (res.ok) {
-        const { bucket } = await res.json();
-        setWorkspaces((prev) =>
-          prev.map((w) =>
-            w.id === activeWs ? { ...w, buckets: [...(w.buckets ?? []), bucket] } : w
-          )
-        );
-        const { localDb } = await import("@/lib/local/db");
-        const ws = await localDb.workspaces.get(activeWs);
-        if (ws && !ws.buckets.some((b) => b.id === bucket.id)) {
-          await localDb.workspaces.put({
-            ...ws,
-            buckets: [
-              ...ws.buckets,
-              {
-                id: bucket.id,
-                name: bucket.name,
-                color: bucket.color ?? color,
-                workspaceId: activeWs,
-              },
-            ],
-          });
-        }
-        setBucketName("");
-        return;
-      }
-    } catch {
-      /* local fallback */
-    }
+    // Always create locally + outbox so mobile (device token) and web stay consistent.
+    // Direct fetch("/api/...") fails on Capacitor and previously left orphan local buckets.
     const bucket = await createLocalBucket(activeWs, name, color);
     setWorkspaces((prev) =>
       prev.map((w) =>
@@ -586,6 +553,7 @@ export default function SettingsPage() {
       )
     );
     setBucketName("");
+    void saveAndSync();
   }
 
   async function updateBucketColor(id: string, color: string) {
@@ -738,16 +706,7 @@ export default function SettingsPage() {
             Setup, task defaults, and how Momentum looks.
           </p>
         </div>
-        <span
-          style={{
-            fontSize: "0.78rem",
-            color: "var(--ink-muted)",
-            fontVariantNumeric: "tabular-nums",
-          }}
-          title="App version"
-        >
-          v{APP_VERSION}
-        </span>
+        <VersionChangelogButton />
       </div>
 
       <div className="settings-chrome">

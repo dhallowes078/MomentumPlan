@@ -26,7 +26,6 @@ import { EmojiPicker } from "@/components/EmojiPicker";
 import { RecurWeekdayPicker } from "@/components/RecurWeekdayPicker";
 import { cachedJson, invalidateClientCache } from "@/lib/client-fetch";
 import * as localRepo from "@/lib/local/repo";
-import { saveAndSync } from "@/lib/local/sync";
 import { resolveMediaUrl } from "@/lib/sync-api";
 
 type Member = {

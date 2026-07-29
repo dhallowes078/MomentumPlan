@@ -13,20 +13,20 @@ const createSchema = z.object({
   notes: z.string().optional().nullable(),
   priority: z.number().int().min(1).max(5).optional(),
   estimateMinutes: z.number().int().min(5).max(8 * 60).optional(),
-  dueAt: z.string().datetime().optional().nullable(),
+  dueAt: z.string().datetime({ offset: true }).optional().nullable(),
   bucketId: z.string().optional().nullable(),
   assigneeId: z.string().optional().nullable(),
-  emoji: z.string().max(8).nullable().optional(),
+  emoji: z.string().max(16).nullable().optional(),
   links: z.array(z.object({ url: z.string().url(), title: z.string().optional() })).optional(),
   locked: z.boolean().optional(),
   allowSplit: z.boolean().optional(),
-  scheduledStart: z.string().datetime().optional().nullable(),
-  scheduledEnd: z.string().datetime().optional().nullable(),
+  scheduledStart: z.string().datetime({ offset: true }).optional().nullable(),
+  scheduledEnd: z.string().datetime({ offset: true }).optional().nullable(),
   isRecurring: z.boolean().optional(),
   recurFreq: z.enum(["DAILY", "WEEKLY", "MONTHLY"]).nullable().optional(),
   recurInterval: z.number().int().min(1).max(52).optional(),
-  recurByWeekdays: z.array(z.number().int().min(0).max(6)).optional(),
-  recurEndsAt: z.string().datetime().nullable().optional(),
+  recurByWeekdays: z.array(z.number().int().min(0).max(6)).nullable().optional(),
+  recurEndsAt: z.string().datetime({ offset: true }).nullable().optional(),
   recurCount: z.number().int().min(1).max(365).nullable().optional(),
   templateId: z.string().nullable().optional(),
 });
@@ -91,6 +91,14 @@ export async function POST(req: Request) {
   const scheduledStart = data.scheduledStart ? new Date(data.scheduledStart) : null;
   const scheduledEnd = data.scheduledEnd ? new Date(data.scheduledEnd) : null;
 
+  // Ignore temporary client ids that aren't real DB rows yet.
+  const bucketId =
+    data.bucketId && !data.bucketId.startsWith("local") ? data.bucketId : null;
+  const assigneeId =
+    data.assigneeId && !data.assigneeId.startsWith("local")
+      ? data.assigneeId
+      : userId;
+
   const task = await prisma.task.create({
     data: {
       workspaceId: data.workspaceId,
@@ -100,8 +108,8 @@ export async function POST(req: Request) {
       priority: data.priority ?? 3,
       estimateMinutes: data.estimateMinutes ?? 30,
       dueAt: data.dueAt ? new Date(data.dueAt) : null,
-      bucketId: data.bucketId ?? null,
-      assigneeId: data.assigneeId ?? userId,
+      bucketId,
+      assigneeId,
       createdById: userId,
       locked,
       allowSplit: locked ? false : (data.allowSplit ?? true),

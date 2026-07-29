@@ -45,6 +45,64 @@ export function canSyncRemote() {
   return Boolean(getDeviceToken());
 }
 
+function syncFailMessage(kind: string, res: Response, body: unknown) {
+  const detail =
+    body && typeof body === "object" && "error" in body && typeof (body as { error: unknown }).error === "string"
+      ? String((body as { error: string }).error)
+      : "";
+  // Keep short — shown in Sync issue dialog.
+  const clipped = detail.length > 160 ? `${detail.slice(0, 157)}…` : detail;
+  return clipped ? `${kind} ${res.status}: ${clipped}` : `${kind} ${res.status}`;
+}
+
+/** Normalize createTask outbox payloads so Zod/API won't 400 on nulls / local ids. */
+function sanitizeCreateTaskBody(body: Record<string, unknown>, userIdHint?: string | null) {
+  const out: Record<string, unknown> = { ...body };
+
+  const asIsoOrNull = (v: unknown) => {
+    if (v == null || v === "") return null;
+    if (typeof v !== "string") return null;
+    const d = new Date(v);
+    if (Number.isNaN(d.getTime())) return null;
+    return d.toISOString();
+  };
+
+  out.dueAt = asIsoOrNull(out.dueAt);
+  out.scheduledStart = asIsoOrNull(out.scheduledStart);
+  out.scheduledEnd = asIsoOrNull(out.scheduledEnd);
+  out.recurEndsAt = asIsoOrNull(out.recurEndsAt);
+
+  if (typeof out.estimateMinutes === "number") {
+    out.estimateMinutes = Math.max(5, Math.min(8 * 60, Math.round(out.estimateMinutes)));
+  }
+
+  if (typeof out.bucketId === "string" && out.bucketId.startsWith("local")) {
+    // Still waiting for createBucket remap — omit so create can succeed.
+    out.bucketId = null;
+  }
+  if (typeof out.assigneeId === "string" && out.assigneeId.startsWith("local")) {
+    out.assigneeId = userIdHint ?? null;
+  }
+
+  if (out.recurByWeekdays != null && !Array.isArray(out.recurByWeekdays)) {
+    out.recurByWeekdays = null;
+  }
+
+  if (typeof out.emoji === "string" && out.emoji.length > 16) {
+    out.emoji = out.emoji.slice(0, 16);
+  }
+
+  // Drop empty links that fail url().
+  if (Array.isArray(out.links)) {
+    out.links = (out.links as { url?: string; title?: string }[]).filter(
+      (l) => typeof l?.url === "string" && /^https?:\/\//i.test(l.url)
+    );
+    if (!(out.links as unknown[]).length) delete out.links;
+  }
+
+  return out;
+}
+
 async function safeJson<T>(path: string, init?: RequestInit): Promise<T | null> {
   try {
     const res = await apiFetch(path, init);
@@ -129,6 +187,9 @@ export async function pullFromServer() {
     return;
   }
 
+  const existingWorkspaces = await localDb.workspaces.toArray();
+  const existingById = new Map(existingWorkspaces.map((w) => [w.id, w]));
+
   const workspaces: LocalWorkspace[] = [];
   for (const w of wsPayload.workspaces) {
     const detail = await safeJson<{
@@ -139,18 +200,32 @@ export async function pullFromServer() {
         members: { user: LocalWorkspace["members"][number]; role: string }[];
       };
     }>(`/api/workspaces/${w.id}`);
+    const prev = existingById.get(w.id);
     if (detail?.workspace) {
+      const serverBuckets = (detail.workspace.buckets ?? []).map((b) => ({
+        ...b,
+        dayHours: parseDayHours(b.dayHours),
+      }));
+      // Keep unsynced local buckets until createBucket outbox remaps them.
+      const pendingLocal = (prev?.buckets ?? []).filter((b) =>
+        b.id.startsWith("local_bucket_")
+      );
       workspaces.push({
         id: detail.workspace.id,
         name: detail.workspace.name,
-        buckets: (detail.workspace.buckets ?? []).map((b) => ({
-          ...b,
-          dayHours: parseDayHours(b.dayHours),
-        })),
+        buckets: [...serverBuckets, ...pendingLocal],
         members: (detail.workspace.members ?? []).map((m) => m.user),
       });
+    } else if (prev) {
+      // Detail fetch failed (often Worker 1101) — never wipe buckets to [].
+      workspaces.push(prev);
     } else {
-      workspaces.push({ id: w.id, name: w.name, buckets: [], members: [] });
+      workspaces.push({
+        id: w.id,
+        name: w.name,
+        buckets: [],
+        members: [],
+      });
     }
   }
   await localDb.workspaces.clear();
@@ -158,18 +233,31 @@ export async function pullFromServer() {
 
   const pendingCreates = await localDb.tasks.filter((t) => Boolean(t._localOnly)).toArray();
   const pendingIds = new Set(pendingCreates.map((t) => t.id));
+  const outboxItems = await localDb.outbox.toArray();
+  const protectedTaskIds = new Set<string>();
+  for (const item of outboxItems) {
+    const op = item.op;
+    // Only protect never-synced creates. Pending patches must not keep deleted
+    // server tasks alive as calendar/task ghosts.
+    if (op.type === "createTask") protectedTaskIds.add(op.localId);
+  }
 
   for (const ws of workspaces) {
     const data = await safeJson<{ tasks: Record<string, unknown>[] }>(
       `/api/tasks?${new URLSearchParams({ workspaceId: ws.id })}`
     );
-    if (!data?.tasks) continue;
+    // Only reconcile when we got a real array — never treat a failed fetch as "delete all".
+    if (!data || !Array.isArray(data.tasks)) continue;
     const serverTasks = data.tasks.map(normalizeTask);
     const removedIds: string[] = [];
     await localDb.transaction("rw", localDb.tasks, localDb.scheduleBlocks, async () => {
       const existing = await localDb.tasks.where("workspaceId").equals(ws.id).toArray();
       for (const t of existing) {
-        if (!pendingIds.has(t.id) && !serverTasks.some((s) => s.id === t.id)) {
+        if (
+          !pendingIds.has(t.id) &&
+          !protectedTaskIds.has(t.id) &&
+          !serverTasks.some((s) => s.id === t.id)
+        ) {
           removedIds.push(t.id);
           await localDb.tasks.delete(t.id);
         }
@@ -180,6 +268,17 @@ export async function pullFromServer() {
         for (const b of orphans) await localDb.scheduleBlocks.delete(b.id);
       }
     });
+  }
+
+  // Drop tasks that belong to workspaces we no longer have (old offline seeds, etc.).
+  const knownWs = new Set(workspaces.map((w) => w.id));
+  const strayTasks = await localDb.tasks
+    .filter((t) => !knownWs.has(t.workspaceId) && !pendingIds.has(t.id) && !protectedTaskIds.has(t.id))
+    .toArray();
+  for (const t of strayTasks) {
+    await localDb.tasks.delete(t.id);
+    const orphans = await localDb.scheduleBlocks.where("taskId").equals(t.id).toArray();
+    for (const b of orphans) await localDb.scheduleBlocks.delete(b.id);
   }
 
   // Also drop any schedule blocks whose task no longer exists locally.
@@ -231,8 +330,16 @@ export async function pullFromServer() {
 
   if (cal) {
     // Always replace — including empty — so deleted tasks disappear from calendar.
+    // Only keep blocks for tasks that still exist locally and are open.
+    const openIds = new Set(
+      (await localDb.tasks.toArray())
+        .filter((t) => t.status !== "DONE" && t.status !== "CANCELLED")
+        .map((t) => t.id)
+    );
     await repo.replaceSchedule(
-      (cal.blocks ?? []).map((b) => ({
+      (cal.blocks ?? [])
+        .filter((b) => openIds.has(b.task.id))
+        .map((b) => ({
         id: b.id,
         taskId: b.task.id,
         start: typeof b.start === "string" ? b.start : new Date(b.start).toISOString(),
@@ -253,8 +360,15 @@ export async function pullFromServer() {
     await repo.replaceMeetings(cal.meetings ?? []);
   } else if (today?.blocks) {
     // Calendar fetch failed — at least refresh today's blocks.
+    const openIds = new Set(
+      (await localDb.tasks.toArray())
+        .filter((t) => t.status !== "DONE" && t.status !== "CANCELLED")
+        .map((t) => t.id)
+    );
     await repo.replaceSchedule(
-      today.blocks.map((b) => ({
+      today.blocks
+        .filter((b) => openIds.has(b.task.id))
+        .map((b) => ({
         id: b.id,
         taskId: b.task.id,
         start: typeof b.start === "string" ? b.start : new Date(b.start).toISOString(),
@@ -345,15 +459,14 @@ export async function flushOutbox() {
   if (flushing) return;
 
   // Local packer can run without network / device token.
+  // Never call /api/schedule/run here — it is CPU-heavy and causes Worker Error 1101
+  // when flushed after every edit.
   const pending = await localDb.outbox.orderBy("createdAt").toArray();
   for (const item of pending) {
     if (item.op.type !== "runScheduler") continue;
     try {
       const { runLocalScheduler } = await import("./scheduler");
       await runLocalScheduler();
-      if (canSyncRemote() && (typeof navigator === "undefined" || navigator.onLine)) {
-        await apiFetch("/api/schedule/run", { method: "POST" }).catch(() => undefined);
-      }
       await localDb.outbox.delete(item.id);
     } catch (e) {
       await localDb.outbox.update(item.id, {
@@ -374,16 +487,41 @@ export async function flushOutbox() {
   flushing = true;
   setStatus("syncing");
   try {
-    const items = await localDb.outbox.orderBy("createdAt").toArray();
+    // Prefer createBucket before task ops so local_bucket_* ids remap first.
+    const items = (await localDb.outbox.orderBy("createdAt").toArray()).sort((a, b) => {
+      const rank = (t: string) => (t === "createBucket" ? 0 : t === "createTask" ? 1 : 2);
+      const d = rank(a.op.type) - rank(b.op.type);
+      return d !== 0 ? d : a.createdAt - b.createdAt;
+    });
     for (const item of items) {
       try {
         const op = item.op;
         if (op.type === "createTask") {
+          const body = sanitizeCreateTaskBody(op.body);
+          // If bucket still local-only, wait until createBucket remaps (don't burn retries).
+          if (
+            typeof op.body.bucketId === "string" &&
+            String(op.body.bucketId).startsWith("local")
+          ) {
+            const pendingBuckets = await localDb.outbox.toArray();
+            const stillLocal = pendingBuckets.some(
+              (row) =>
+                row.op.type === "createBucket" &&
+                row.op.localId === op.body.bucketId
+            );
+            if (stillLocal) {
+              continue;
+            }
+            body.bucketId = null;
+          }
           const res = await apiFetch("/api/tasks", {
             method: "POST",
-            body: JSON.stringify(op.body),
+            body: JSON.stringify(body),
           });
-          if (!res.ok) throw new Error(`create ${res.status}`);
+          if (!res.ok) {
+            const errBody = await res.json().catch(() => null);
+            throw new Error(syncFailMessage("create", res, errBody));
+          }
           const data = await res.json();
           const serverId = data.task?.id as string;
           if (serverId) {
@@ -393,6 +531,7 @@ export async function flushOutbox() {
               await localDb.tasks.put({
                 ...local,
                 id: serverId,
+                bucketId: (body.bucketId as string | null) ?? local.bucketId,
                 _localOnly: false,
               });
             }
@@ -427,11 +566,93 @@ export async function flushOutbox() {
             method: "PATCH",
             body: JSON.stringify(op.body),
           });
-          if (!res.ok) throw new Error(`patch ${res.status}`);
+          if (res.status === 404) {
+            // Server already gone — drop local ghost + related blocks.
+            await localDb.tasks.delete(op.taskId);
+            const orphans = await localDb.scheduleBlocks.where("taskId").equals(op.taskId).toArray();
+            for (const b of orphans) await localDb.scheduleBlocks.delete(b.id);
+          } else if (!res.ok) {
+            const errBody = await res.json().catch(() => null);
+            throw new Error(syncFailMessage("patch", res, errBody));
+          }
         } else if (op.type === "deleteTask") {
           const res = await apiFetch(`/api/tasks/${op.taskId}`, { method: "DELETE" });
           // 404 = already gone on server — treat as success.
-          if (!res.ok && res.status !== 404) throw new Error(`delete ${res.status}`);
+          if (!res.ok && res.status !== 404) {
+            const errBody = await res.json().catch(() => null);
+            throw new Error(syncFailMessage("delete", res, errBody));
+          }
+        } else if (op.type === "createBucket") {
+          const res = await apiFetch("/api/buckets", {
+            method: "POST",
+            body: JSON.stringify({
+              workspaceId: op.workspaceId,
+              name: op.name,
+              color: op.color,
+            }),
+          });
+          if (!res.ok) {
+            const errBody = await res.json().catch(() => null);
+            throw new Error(syncFailMessage("createBucket", res, errBody));
+          }
+          const data = await res.json();
+          const serverId = data.bucket?.id as string | undefined;
+          if (serverId) {
+            const ws = await localDb.workspaces.get(op.workspaceId);
+            if (ws) {
+              await localDb.workspaces.put({
+                ...ws,
+                buckets: (ws.buckets ?? []).map((b) =>
+                  b.id === op.localId
+                    ? {
+                        ...b,
+                        id: serverId,
+                        name: data.bucket.name ?? b.name,
+                        color: data.bucket.color ?? b.color,
+                      }
+                    : b
+                ),
+              });
+            }
+            // Remap tasks that already reference the temporary bucket id.
+            const tasks = await localDb.tasks
+              .filter((t) => t.bucketId === op.localId)
+              .toArray();
+            for (const t of tasks) {
+              await localDb.tasks.put({
+                ...t,
+                bucketId: serverId,
+                bucket: {
+                  id: serverId,
+                  name: data.bucket.name ?? op.name,
+                  color: data.bucket.color ?? op.color,
+                },
+              });
+            }
+            // Remap pending patchTask / createTask bodies that still point at the local bucket.
+            const pendingPatches = await localDb.outbox.toArray();
+            for (const row of pendingPatches) {
+              if (row.op.type === "patchTask") {
+                if (row.op.body?.bucketId !== op.localId) continue;
+                await localDb.outbox.put({
+                  ...row,
+                  op: {
+                    ...row.op,
+                    body: { ...row.op.body, bucketId: serverId },
+                  },
+                });
+              } else if (row.op.type === "createTask") {
+                if (row.op.body?.bucketId !== op.localId) continue;
+                await localDb.outbox.put({
+                  ...row,
+                  op: {
+                    ...row.op,
+                    body: { ...row.op.body, bucketId: serverId },
+                  },
+                });
+              }
+            }
+          }
         } else if (op.type === "putChecklist") {
           const res = await apiFetch(`/api/tasks/${op.taskId}/checklist`, {
             method: "PUT",
@@ -451,10 +672,9 @@ export async function flushOutbox() {
           });
           if (!res.ok) throw new Error(`prefs ${res.status}`);
         } else if (op.type === "runScheduler") {
-          // Should already be drained above; keep as safety net.
+          // Should already be drained above; local-only safety net.
           const { runLocalScheduler } = await import("./scheduler");
           await runLocalScheduler();
-          await apiFetch("/api/schedule/run", { method: "POST" }).catch(() => undefined);
         }
         await localDb.outbox.delete(item.id);
       } catch (e) {
@@ -476,9 +696,17 @@ export async function flushOutbox() {
 /** Push local outbox, pull server state, then push again (e.g. after ID remap). */
 export async function saveAndSync() {
   await flushOutbox();
+  try {
+    const { runLocalScheduler } = await import("./scheduler");
+    await runLocalScheduler();
+  } catch {
+    // packing optional
+  }
   if (canSyncRemote()) {
     await pullFromServer();
     await flushOutbox();
+    // Remote packer is expensive on Workers — fire-and-forget, never block edits.
+    void apiFetch("/api/schedule/run", { method: "POST" }).catch(() => undefined);
   }
 }
 

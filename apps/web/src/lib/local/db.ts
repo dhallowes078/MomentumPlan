@@ -129,6 +129,13 @@ export type OutboxOp =
     }
   | { type: "patchTask"; taskId: string; body: Record<string, unknown> }
   | { type: "deleteTask"; taskId: string }
+  | {
+      type: "createBucket";
+      localId: string;
+      workspaceId: string;
+      name: string;
+      color: string;
+    }
   | { type: "putChecklist"; taskId: string; items: { text: string; done: boolean }[] }
   | { type: "reorder"; orderedTaskIds: string[] }
   | { type: "patchPrefs"; body: Record<string, unknown> }
