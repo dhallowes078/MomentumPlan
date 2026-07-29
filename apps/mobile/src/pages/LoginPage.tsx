@@ -1,6 +1,31 @@
-import { useState } from "react";
-import { apiUrl, setDeviceToken, clearStoredSyncApiBase } from "@/lib/sync-api";
+import { useEffect, useState } from "react";
+import { apiUrl, setDeviceToken, clearStoredSyncApiBase, getSyncApiBase } from "@/lib/sync-api";
 import { pullFromServer, flushOutbox } from "@/lib/local/sync";
+
+async function finishWithToken(token: string, onLinked: () => void) {
+  setDeviceToken(token);
+  await pullFromServer();
+  await flushOutbox();
+  const probe = await fetch(apiUrl("/api/workspaces"), {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!probe.ok) {
+    throw new Error("Signed in, but could not load workspaces. Try again.");
+  }
+  onLinked();
+}
+
+function parseAuthDeepLink(url: string): string | null {
+  try {
+    // app.momentum.plan://auth?token=...
+    const q = url.includes("?") ? url.slice(url.indexOf("?") + 1) : "";
+    const params = new URLSearchParams(q);
+    const token = params.get("token");
+    return token && token.length > 20 ? token : null;
+  } catch {
+    return null;
+  }
+}
 
 export function LoginPage({
   onOffline,
@@ -11,7 +36,67 @@ export function LoginPage({
 }) {
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
+  const [googleBusy, setGoogleBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let removeUrl: (() => void) | undefined;
+    let removeState: (() => void) | undefined;
+
+    void (async () => {
+      try {
+        const { App } = await import("@capacitor/app");
+        const urlSub = await App.addListener("appUrlOpen", (event) => {
+          const token = parseAuthDeepLink(event.url);
+          if (!token) return;
+          setGoogleBusy(true);
+          setError(null);
+          void import("@capacitor/browser")
+            .then(({ Browser }) => Browser.close())
+            .catch(() => undefined);
+          void finishWithToken(token, onLinked)
+            .catch((err) => {
+              setError(err instanceof Error ? err.message : "Google sign-in failed");
+            })
+            .finally(() => setGoogleBusy(false));
+        });
+        removeUrl = () => {
+          void urlSub.remove();
+        };
+
+        // If the deep link launched a cold start, App.getLaunchUrl may hold it.
+        const launch = await App.getLaunchUrl().catch(() => undefined);
+        if (launch?.url) {
+          const token = parseAuthDeepLink(launch.url);
+          if (token) {
+            setGoogleBusy(true);
+            void finishWithToken(token, onLinked)
+              .catch((err) => {
+                setError(err instanceof Error ? err.message : "Google sign-in failed");
+              })
+              .finally(() => setGoogleBusy(false));
+          }
+        }
+
+        const stateSub = await App.addListener("appStateChange", ({ isActive }) => {
+          if (!isActive) return;
+          void import("@capacitor/browser")
+            .then(({ Browser }) => Browser.close())
+            .catch(() => undefined);
+        });
+        removeState = () => {
+          void stateSub.remove();
+        };
+      } catch {
+        // Web preview — deep links unavailable.
+      }
+    })();
+
+    return () => {
+      removeUrl?.();
+      removeState?.();
+    };
+  }, [onLinked]);
 
   async function linkAccount(e: React.FormEvent) {
     e.preventDefault();
@@ -34,21 +119,30 @@ export function LoginPage({
       }
       const data = await res.json();
       if (!data?.token) throw new Error("No sync token returned");
-      setDeviceToken(data.token);
-      await pullFromServer();
-      await flushOutbox();
-      // Confirm tasks actually arrived — empty workspace is ok, auth failure is not.
-      const probe = await fetch(apiUrl("/api/workspaces"), {
-        headers: { Authorization: `Bearer ${data.token}` },
-      });
-      if (!probe.ok) {
-        throw new Error("Linked, but could not load workspaces. Try again.");
-      }
-      onLinked();
+      await finishWithToken(data.token, onLinked);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Link failed");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function continueWithGoogle() {
+    setGoogleBusy(true);
+    setError(null);
+    try {
+      clearStoredSyncApiBase();
+      const base = getSyncApiBase() || "https://momentum.momentum-app.workers.dev";
+      const url = `${base}/mobile-auth/google`;
+      const { Browser } = await import("@capacitor/browser");
+      const finished = await Browser.addListener("browserFinished", () => {
+        setGoogleBusy(false);
+        void finished.remove();
+      });
+      await Browser.open({ url, presentationStyle: "popover" });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not open Google sign-in");
+      setGoogleBusy(false);
     }
   }
 
@@ -60,9 +154,30 @@ export function LoginPage({
             Momentum
           </h1>
           <p style={{ margin: "0.4rem 0 0", color: "var(--ink-muted)" }}>
-            Tasks stay on this phone. Link with your 6-digit code to sync to the cloud, or stay
-            offline.
+            Sign in with Google to sync, enter a 6-digit code from the web app, or stay offline.
           </p>
+        </div>
+
+        <button
+          type="button"
+          className="btn"
+          disabled={googleBusy || busy}
+          onClick={() => void continueWithGoogle()}
+        >
+          {googleBusy ? "Waiting for Google…" : "Continue with Google"}
+        </button>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr auto 1fr",
+            alignItems: "center",
+            gap: "0.65rem",
+          }}
+        >
+          <div style={{ height: 1, background: "var(--line)" }} />
+          <span style={{ fontSize: "0.75rem", color: "var(--ink-muted)" }}>or</span>
+          <div style={{ height: 1, background: "var(--line)" }} />
         </div>
 
         <form onSubmit={(e) => void linkAccount(e)} style={{ display: "grid", gap: "0.65rem" }}>
@@ -78,12 +193,12 @@ export function LoginPage({
             />
           </label>
           {error && <p style={{ margin: 0, color: "var(--danger)", fontSize: "0.9rem" }}>{error}</p>}
-          <button className="btn" type="submit" disabled={busy}>
-            {busy ? "Linking…" : "Link this device"}
+          <button className="btn secondary" type="submit" disabled={busy || googleBusy}>
+            {busy ? "Linking…" : "Link with code"}
           </button>
         </form>
 
-        <button type="button" className="btn secondary" onClick={onOffline}>
+        <button type="button" className="btn secondary" onClick={onOffline} disabled={googleBusy}>
           Use offline only
         </button>
       </div>

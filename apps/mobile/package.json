@@ -15,11 +15,13 @@
   "dependencies": {
     "@capacitor/android": "^8.4.2",
     "@capacitor/app": "^8.1.1",
+    "@capacitor/browser": "^8.0.4",
     "@capacitor/core": "^8.4.2",
     "@capacitor/local-notifications": "^8.2.1",
     "@capacitor/network": "^8.0.1",
     "@capacitor/preferences": "^8.0.1",
     "@capacitor/status-bar": "^8.0.3",
+    "@momentum/scheduler": "*",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
     "dexie": "^4.4.4",
@@ -27,8 +29,7 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router-dom": "^7.6.0",
-    "uuid": "^11.1.1",
-    "@momentum/scheduler": "*"
+    "uuid": "^11.1.1"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.4.2",

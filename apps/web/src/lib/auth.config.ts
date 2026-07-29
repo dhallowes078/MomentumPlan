@@ -67,6 +67,7 @@ export const authConfig = {
       const bearer = request.headers.get("authorization")?.toLowerCase().startsWith("bearer ");
       const isPublic =
         path.startsWith("/login") ||
+        path.startsWith("/mobile-auth") ||
         path.startsWith("/api/auth") ||
         path.startsWith("/api/health") ||
         path.startsWith("/manifest") ||
