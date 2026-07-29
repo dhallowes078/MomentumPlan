@@ -12,7 +12,8 @@ import { AssigneeSelect } from "@/components/AssigneeSelect";
 import { FileButton } from "@/components/FileButton";
 import { EmojiPicker } from "@/components/EmojiPicker";
 import { createLocalTask, listWorkspaces } from "@/lib/local/repo";
-import { flushOutbox, pullFromServer } from "@/lib/local/sync";
+import { saveAndSync } from "@/lib/local/sync";
+import { RecurWeekdayPicker } from "@/components/RecurWeekdayPicker";
 
 type Member = {
   id: string;
@@ -86,6 +87,7 @@ export function NewTaskModal({
   const [recurInterval, setRecurInterval] = useState(1);
   const [recurEndsAt, setRecurEndsAt] = useState("");
   const [recurCount, setRecurCount] = useState("");
+  const [recurByWeekdays, setRecurByWeekdays] = useState<number[]>([]);
   const [templates, setTemplates] = useState<
     Array<{ id: string; name: string; title: string; priority: number; estimateMinutes: number }>
   >([]);
@@ -234,6 +236,7 @@ export function NewTaskModal({
     setEmoji(null);
     setDocs([]);
     setIsRecurring(false);
+    setRecurByWeekdays([]);
     setMode(isEvent ? "full" : initialMode);
   }
 
@@ -304,12 +307,15 @@ export function NewTaskModal({
           : null,
       recurCount:
         (isEvent || mode === "full") && isRecurring && recurCount ? Number(recurCount) : null,
+      recurByWeekdays:
+        (isEvent || mode === "full") && isRecurring && recurFreq === "WEEKLY" && recurByWeekdays.length
+          ? recurByWeekdays
+          : null,
       checklist: mode === "full" ? checklist.filter((c) => c.text.trim()) : undefined,
       mentionIds: mode === "full" && mentionIds.length ? mentionIds : undefined,
     });
 
-    await flushOutbox();
-    await pullFromServer();
+    await saveAndSync();
 
     const { getTask } = await import("@/lib/local/repo");
     const { localDb } = await import("@/lib/local/db");
@@ -704,6 +710,9 @@ export function NewTaskModal({
                         onChange={(e) => setRecurInterval(Number(e.target.value) || 1)}
                       />
                     </label>
+                    {recurFreq === "WEEKLY" && (
+                      <RecurWeekdayPicker value={recurByWeekdays} onChange={setRecurByWeekdays} />
+                    )}
                     <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
                       Ends on
                       <input

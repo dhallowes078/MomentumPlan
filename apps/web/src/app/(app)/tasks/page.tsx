@@ -9,7 +9,7 @@ import { CreateChooser } from "@/components/CreateChooser";
 import { useLocalTasks, useLocalWorkspaces } from "@/lib/local/hooks";
 import * as repo from "@/lib/local/repo";
 import type { LocalTask } from "@/lib/local/db";
-import { flushOutbox, pullFromServer } from "@/lib/local/sync";
+import { saveAndSync } from "@/lib/local/sync";
 import { resolveMediaUrl } from "@/lib/sync-api";
 
 type SortMode = "manual" | "priority" | "bucket";
@@ -90,8 +90,7 @@ export default function TasksPage() {
 
   async function reopen(taskId: string) {
     await repo.patchLocalTask(taskId, { status: "TODO", completedAt: null }, { status: "TODO" });
-    await flushOutbox();
-    await pullFromServer();
+    await saveAndSync();
   }
 
   function onDragStart(index: number) {
@@ -168,13 +167,11 @@ export default function TasksPage() {
     for (const u of updates) {
       await repo.patchLocalTask(u.id, { priority: u.priority, position: u.position });
     }
-    await fetch("/api/tasks/reorder", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ updates }),
+    await repo.enqueue({
+      type: "reorder",
+      orderedTaskIds: updates.map((u) => u.id),
     });
-    await flushOutbox();
-    await pullFromServer();
+    await saveAndSync();
   }
 
   const canReorder = tab === "open" && sortMode === "manual";
@@ -416,7 +413,7 @@ export default function TasksPage() {
         variant={createVariant}
         onClose={() => {
           setCreateOpen(false);
-          void pullFromServer();
+          void saveAndSync();
         }}
       />
     </div>

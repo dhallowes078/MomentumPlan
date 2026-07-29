@@ -1,4 +1,4 @@
-import { addDays, addMonths, addWeeks } from "date-fns";
+import { addDays, addMonths, addWeeks, startOfDay } from "date-fns";
 
 export type RecurrenceInput = {
   isRecurring: boolean;
@@ -15,14 +15,48 @@ export type RecurrenceInput = {
   locked?: boolean;
 };
 
-export function nextOccurrenceDate(from: Date, freq: string, interval: number) {
-  if (freq === "DAILY") return addDays(from, interval);
-  if (freq === "MONTHLY") return addMonths(from, interval);
-  return addWeeks(from, interval);
+function normalizeWeekdays(raw?: number[] | null): number[] {
+  if (!raw?.length) return [];
+  return [...new Set(raw.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))].sort(
+    (a, b) => a - b
+  );
+}
+
+/** Next weekly occurrence, optionally limited to selected weekdays (0=Sun…6=Sat). */
+export function nextWeeklyOccurrence(
+  from: Date,
+  interval: number,
+  byWeekdays?: number[] | null
+): Date {
+  const days = normalizeWeekdays(byWeekdays);
+  const step = Math.max(1, interval);
+  if (!days.length) return addWeeks(from, step);
+
+  const fromDow = from.getDay();
+  // Later this week on a selected weekday.
+  for (const d of days) {
+    if (d > fromDow) return addDays(from, d - fromDow);
+  }
+  // First selected weekday in the week `step` weeks ahead.
+  const daysUntilFirstNextCycle = 7 - fromDow + days[0] + (step - 1) * 7;
+  return addDays(from, daysUntilFirstNextCycle);
+}
+
+export function nextOccurrenceDate(
+  from: Date,
+  freq: string,
+  interval: number,
+  byWeekdays?: number[] | null
+) {
+  const step = Math.max(1, interval);
+  if (freq === "DAILY") return addDays(from, step);
+  if (freq === "MONTHLY") return addMonths(from, step);
+  return nextWeeklyOccurrence(from, step, byWeekdays);
 }
 
 function recurrenceBase(task: RecurrenceInput): Date {
-  return task.dueAt ?? task.scheduledStart ?? new Date();
+  const raw = task.dueAt ?? task.scheduledStart ?? new Date();
+  return startOfDay(raw);
 }
 
 export function shouldCreateNextOccurrence(task: RecurrenceInput) {
@@ -30,15 +64,33 @@ export function shouldCreateNextOccurrence(task: RecurrenceInput) {
   const done = (task.recurOccurrencesDone ?? 0) + 1;
   if (task.recurCount != null && done >= task.recurCount) return false;
   const base = recurrenceBase(task);
-  const nextDue = nextOccurrenceDate(base, task.recurFreq, task.recurInterval ?? 1);
+  const nextDue = nextOccurrenceDate(
+    base,
+    task.recurFreq,
+    task.recurInterval ?? 1,
+    task.recurByWeekdays
+  );
   if (task.recurEndsAt && nextDue > task.recurEndsAt) return false;
   return true;
 }
 
 export function buildNextOccurrenceFields(task: RecurrenceInput & { id: string }) {
   const base = recurrenceBase(task);
-  const nextAnchor = nextOccurrenceDate(base, task.recurFreq!, task.recurInterval ?? 1);
-  const deltaMs = nextAnchor.getTime() - base.getTime();
+  const nextAnchor = nextOccurrenceDate(
+    base,
+    task.recurFreq!,
+    task.recurInterval ?? 1,
+    task.recurByWeekdays
+  );
+  // Preserve time-of-day from the original due/scheduled timestamp.
+  const original = task.dueAt ?? task.scheduledStart ?? new Date();
+  nextAnchor.setHours(
+    original.getHours(),
+    original.getMinutes(),
+    original.getSeconds(),
+    original.getMilliseconds()
+  );
+  const deltaMs = nextAnchor.getTime() - (task.dueAt ?? task.scheduledStart ?? base).getTime();
 
   let scheduledStart: Date | null = null;
   let scheduledEnd: Date | null = null;

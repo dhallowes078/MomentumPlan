@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { liveQuery } from "dexie";
 import { localDb, type LocalPrefs, type LocalScheduleBlock, type LocalTask, type LocalWorkspace } from "./db";
 import * as repo from "./repo";
-import { bootLocalSync, flushOutbox, pullFromServer, subscribeSync, todayWindow } from "./sync";
+import { bootLocalSync, saveAndSync, subscribeSync, todayWindow } from "./sync";
 
 function useLiveQuery<T>(querier: () => Promise<T>, initial: T, deps: unknown[] = []): T {
   const [value, setValue] = useState<T>(initial);
@@ -36,8 +36,7 @@ export function useSyncIndicator() {
     });
   }, []);
   const refresh = useCallback(async () => {
-    await flushOutbox();
-    await pullFromServer();
+    await saveAndSync();
   }, []);
   return { ...state, refresh };
 }
@@ -50,7 +49,7 @@ export function useLocalBoot() {
       if (!cancelled) setReady(true);
     });
     const onOnline = () => {
-      void flushOutbox().then(() => pullFromServer());
+      void saveAndSync();
     };
     window.addEventListener("online", onOnline);
     return () => {
@@ -95,6 +94,11 @@ export function useLocalMeetings() {
 
 export function useLocalScheduleBlocks() {
   return useLiveQuery(() => repo.listScheduleBlocks(), [] as LocalScheduleBlock[], []);
+}
+
+/** All tasks across workspaces — used by calendar to filter orphan/ghost blocks. */
+export function useLocalAllTasks() {
+  return useLiveQuery(() => localDb.tasks.toArray(), [] as LocalTask[], []);
 }
 
 export function useLocalTask(id: string) {

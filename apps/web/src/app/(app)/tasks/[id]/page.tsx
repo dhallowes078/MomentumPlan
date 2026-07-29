@@ -23,9 +23,10 @@ import { DueDatePicker } from "@/components/DueDatePicker";
 import { AssigneeSelect } from "@/components/AssigneeSelect";
 import { FileButton } from "@/components/FileButton";
 import { EmojiPicker } from "@/components/EmojiPicker";
+import { RecurWeekdayPicker } from "@/components/RecurWeekdayPicker";
 import { cachedJson, invalidateClientCache } from "@/lib/client-fetch";
 import * as localRepo from "@/lib/local/repo";
-import { flushOutbox, pullFromServer } from "@/lib/local/sync";
+import { saveAndSync } from "@/lib/local/sync";
 import { resolveMediaUrl } from "@/lib/sync-api";
 
 type Member = {
@@ -70,6 +71,7 @@ type TaskDetail = {
   isRecurring?: boolean;
   recurFreq?: RecurFreq | null;
   recurInterval?: number;
+  recurByWeekdays?: number[] | null;
   recurEndsAt?: string | null;
   recurCount?: number | null;
   links: { id: string; url: string; title: string | null }[];
@@ -121,6 +123,7 @@ type TaskDraft = {
   isRecurring: boolean;
   recurFreq: RecurFreq;
   recurInterval: number;
+  recurByWeekdays: number[];
   recurEndsAt: string;
   recurCount: string;
 };
@@ -145,6 +148,7 @@ function toDraft(task: TaskDetail): TaskDraft {
     isRecurring: Boolean(task.isRecurring),
     recurFreq: task.recurFreq ?? "WEEKLY",
     recurInterval: task.recurInterval ?? 1,
+    recurByWeekdays: Array.isArray(task.recurByWeekdays) ? task.recurByWeekdays : [],
     recurEndsAt: task.recurEndsAt ? task.recurEndsAt.slice(0, 10) : "",
     recurCount: task.recurCount != null ? String(task.recurCount) : "",
   };
@@ -220,10 +224,20 @@ function draftPatchBody(draft: TaskDraft, baseline: TaskDraft) {
     if (count !== baseCount || draft.isRecurring !== baseline.isRecurring) {
       body.recurCount = count;
     }
+    const daysChanged =
+      draft.recurByWeekdays.length !== baseline.recurByWeekdays.length ||
+      draft.recurByWeekdays.some((d, i) => d !== baseline.recurByWeekdays[i]);
+    if (daysChanged || draft.isRecurring !== baseline.isRecurring || draft.recurFreq !== baseline.recurFreq) {
+      body.recurByWeekdays =
+        draft.recurFreq === "WEEKLY" && draft.recurByWeekdays.length
+          ? draft.recurByWeekdays
+          : null;
+    }
   } else if (baseline.isRecurring) {
     body.recurFreq = null;
     body.recurEndsAt = null;
     body.recurCount = null;
+    body.recurByWeekdays = null;
   }
   return body;
 }
@@ -303,6 +317,11 @@ export default function TaskDetailPage() {
       bucketId: local.bucketId,
       bucket: local.bucket ?? null,
       isRecurring: local.isRecurring,
+      recurFreq: (local.recurFreq as RecurFreq | null) ?? null,
+      recurInterval: local.recurInterval,
+      recurByWeekdays: local.recurByWeekdays ?? null,
+      recurEndsAt: local.recurEndsAt ?? null,
+      recurCount: local.recurCount ?? null,
       links: [],
       attachments: [],
       checklistItems: [],
@@ -405,8 +424,8 @@ export default function TaskDetailPage() {
         });
       }
 
-      await flushOutbox();
-      await pullFromServer();
+      const { saveAndSync } = await import("@/lib/local/sync");
+      await saveAndSync();
       await load(true);
     } finally {
       setSaving(false);
@@ -420,7 +439,8 @@ export default function TaskDetailPage() {
       { status: "DONE", completedAt: new Date().toISOString() },
       { status: "DONE" }
     );
-    await flushOutbox();
+    const { saveAndSync } = await import("@/lib/local/sync");
+    await saveAndSync();
     window.setTimeout(() => {
       router.push("/tasks");
     }, 850);
@@ -432,9 +452,17 @@ export default function TaskDetailPage() {
       { status: "TODO", completedAt: null },
       { status: "TODO" }
     );
-    await flushOutbox();
-    await pullFromServer();
+    const { saveAndSync } = await import("@/lib/local/sync");
+    await saveAndSync();
     await load(true);
+  }
+
+  async function remove() {
+    if (!confirm("Delete this task?")) return;
+    await localRepo.deleteLocalTask(String(params.id));
+    const { saveAndSync } = await import("@/lib/local/sync");
+    await saveAndSync();
+    router.push("/tasks");
   }
 
   async function toggleChunk(blockId: string, completed: boolean) {
@@ -516,12 +544,6 @@ export default function TaskDetailPage() {
         })),
       }),
     });
-  }
-
-  async function remove() {
-    if (!confirm("Delete this task?")) return;
-    await fetch(`/api/tasks/${params.id}`, { method: "DELETE" });
-    router.push("/tasks");
   }
 
   if (!task || !draft) {
@@ -766,6 +788,12 @@ export default function TaskDetailPage() {
                     }
                   />
                 </label>
+                {draft.recurFreq === "WEEKLY" && (
+                  <RecurWeekdayPicker
+                    value={draft.recurByWeekdays}
+                    onChange={(days) => updateDraft({ recurByWeekdays: days })}
+                  />
+                )}
                 <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
                   Ends on
                   <input

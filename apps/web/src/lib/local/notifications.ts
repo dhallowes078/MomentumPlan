@@ -2,7 +2,7 @@
 
 import type { LocalPrefs, LocalScheduleBlock } from "@/lib/local/db";
 import * as repo from "@/lib/local/repo";
-import { flushOutbox, pullFromServer } from "@/lib/local/sync";
+import { saveAndSync } from "@/lib/local/sync";
 
 const CHANNEL_ID = "momentum-tasks";
 const START_BASE = 10_000;
@@ -321,8 +321,7 @@ export async function registerNotificationActions() {
       await repo.patchLocalTask(taskId, { status: "IN_PROGRESS" }, { status: "IN_PROGRESS" });
     }
 
-    await flushOutbox();
-    await pullFromServer();
+    await saveAndSync();
     await rescheduleTaskNotifications();
   });
 }

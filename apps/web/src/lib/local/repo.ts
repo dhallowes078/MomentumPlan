@@ -154,6 +154,8 @@ export async function patchLocalTask(id: string, patch: Partial<LocalTask>, sync
   if (syncBody) {
     await enqueue({ type: "patchTask", taskId: id, body: syncBody });
   }
+  // Keep calendar/today in sync with local changes even when offline.
+  await enqueue({ type: "runScheduler" });
   return next;
 }
 
@@ -175,6 +177,7 @@ export async function createLocalTask(input: {
   isRecurring?: boolean;
   recurFreq?: string | null;
   recurInterval?: number;
+  recurByWeekdays?: number[] | null;
   recurEndsAt?: string | null;
   recurCount?: number | null;
   checklist?: { text: string; done: boolean }[];
@@ -207,6 +210,11 @@ export async function createLocalTask(input: {
     completedAt: null,
     assigneeId: input.assigneeId ?? null,
     isRecurring: Boolean(input.isRecurring),
+    recurFreq: input.recurFreq ?? null,
+    recurInterval: input.recurInterval ?? 1,
+    recurByWeekdays: input.recurByWeekdays ?? null,
+    recurEndsAt: input.recurEndsAt ?? null,
+    recurCount: input.recurCount ?? null,
     updatedAt: new Date().toISOString(),
     bucket,
     _localOnly: true,
@@ -233,13 +241,39 @@ export async function createLocalTask(input: {
       isRecurring: input.isRecurring ?? false,
       recurFreq: input.recurFreq ?? null,
       recurInterval: input.recurInterval ?? 1,
+      recurByWeekdays: input.recurByWeekdays ?? null,
       recurEndsAt: input.recurEndsAt ?? null,
       recurCount: input.recurCount ?? null,
     },
     checklist: input.checklist,
     mentionIds: input.mentionIds,
   });
+  await enqueue({ type: "runScheduler" });
   return task;
+}
+
+/** Hard-delete a task locally and queue remote DELETE. Clears schedule blocks. */
+export async function deleteLocalTask(taskId: string) {
+  const blocks = await localDb.scheduleBlocks.where("taskId").equals(taskId).toArray();
+  await localDb.transaction(
+    "rw",
+    localDb.tasks,
+    localDb.scheduleBlocks,
+    localDb.backlog,
+    localDb.outbox,
+    async () => {
+      await localDb.tasks.delete(taskId);
+      await localDb.backlog.delete(taskId);
+      for (const b of blocks) {
+        await localDb.scheduleBlocks.delete(b.id);
+      }
+    }
+  );
+  // Skip remote delete for never-synced local drafts.
+  if (!taskId.startsWith("local_")) {
+    await enqueue({ type: "deleteTask", taskId });
+  }
+  await enqueue({ type: "runScheduler" });
 }
 
 export async function listScheduleBlocks(): Promise<LocalScheduleBlock[]> {

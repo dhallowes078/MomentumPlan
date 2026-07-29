@@ -45,6 +45,11 @@ export type LocalTask = {
   completedAt: string | null;
   assigneeId: string | null;
   isRecurring: boolean;
+  recurFreq?: string | null;
+  recurInterval?: number;
+  recurByWeekdays?: number[] | null;
+  recurEndsAt?: string | null;
+  recurCount?: number | null;
   updatedAt: string;
   bucket?: LocalBucket | null;
   assignee?: { id: string; name: string | null; email: string; image?: string | null; color?: string | null } | null;
@@ -123,6 +128,7 @@ export type OutboxOp =
       mentionIds?: string[];
     }
   | { type: "patchTask"; taskId: string; body: Record<string, unknown> }
+  | { type: "deleteTask"; taskId: string }
   | { type: "putChecklist"; taskId: string; items: { text: string; done: boolean }[] }
   | { type: "reorder"; orderedTaskIds: string[] }
   | { type: "patchPrefs"; body: Record<string, unknown> }

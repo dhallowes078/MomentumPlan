@@ -7,7 +7,7 @@ import { format } from "date-fns";
 import { formatMinutes, formatTime, priorityColor } from "@/lib/format";
 import { useLocalToday } from "@/lib/local/hooks";
 import * as repo from "@/lib/local/repo";
-import { flushOutbox } from "@/lib/local/sync";
+import { saveAndSync } from "@/lib/local/sync";
 
 export function TodayView() {
   const { blocks: liveBlocks, backlog, atRisk } = useLocalToday();
@@ -26,9 +26,7 @@ export function TodayView() {
       const { runLocalScheduler } = await import("@/lib/local/scheduler");
       await runLocalScheduler();
       await repo.enqueue({ type: "runScheduler" });
-      await flushOutbox();
-      const { canSyncRemote, pullFromServer } = await import("@/lib/local/sync");
-      if (canSyncRemote()) await pullFromServer();
+      await saveAndSync();
     } finally {
       setScheduling(false);
     }
@@ -42,9 +40,7 @@ export function TodayView() {
       { status: "DONE" }
     );
     window.setTimeout(async () => {
-      await flushOutbox();
-      const { pullFromServer } = await import("@/lib/local/sync");
-      await pullFromServer();
+      await saveAndSync();
       void import("@/lib/local/widget-sync").then((m) => m.syncHomeWidget());
       setCompletingId(null);
     }, 400);

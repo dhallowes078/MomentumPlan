@@ -78,6 +78,13 @@ function normalizeTask(t: Record<string, unknown>): LocalTask {
     completedAt: t.completedAt ? String(t.completedAt) : null,
     assigneeId: (t.assigneeId as string | null) ?? null,
     isRecurring: Boolean(t.isRecurring),
+    recurFreq: (t.recurFreq as string | null) ?? null,
+    recurInterval: Number(t.recurInterval ?? 1),
+    recurByWeekdays: Array.isArray(t.recurByWeekdays)
+      ? (t.recurByWeekdays as number[])
+      : null,
+    recurEndsAt: t.recurEndsAt ? String(t.recurEndsAt) : null,
+    recurCount: t.recurCount != null ? Number(t.recurCount) : null,
     updatedAt: t.updatedAt ? String(t.updatedAt) : new Date().toISOString(),
     bucket: (t.bucket as LocalTask["bucket"]) ?? null,
     assignee: (t.assignee as LocalTask["assignee"]) ?? null,
@@ -158,15 +165,36 @@ export async function pullFromServer() {
     );
     if (!data?.tasks) continue;
     const serverTasks = data.tasks.map(normalizeTask);
-    await localDb.transaction("rw", localDb.tasks, async () => {
+    const removedIds: string[] = [];
+    await localDb.transaction("rw", localDb.tasks, localDb.scheduleBlocks, async () => {
       const existing = await localDb.tasks.where("workspaceId").equals(ws.id).toArray();
       for (const t of existing) {
         if (!pendingIds.has(t.id) && !serverTasks.some((s) => s.id === t.id)) {
+          removedIds.push(t.id);
           await localDb.tasks.delete(t.id);
         }
       }
       await localDb.tasks.bulkPut(serverTasks);
+      for (const id of removedIds) {
+        const orphans = await localDb.scheduleBlocks.where("taskId").equals(id).toArray();
+        for (const b of orphans) await localDb.scheduleBlocks.delete(b.id);
+      }
     });
+  }
+
+  // Also drop any schedule blocks whose task no longer exists locally.
+  const allTasks = await localDb.tasks.toArray();
+  const liveIds = new Set(allTasks.map((t) => t.id));
+  const allBlocks = await localDb.scheduleBlocks.toArray();
+  for (const b of allBlocks) {
+    if (!liveIds.has(b.taskId)) {
+      await localDb.scheduleBlocks.delete(b.id);
+    } else {
+      const task = allTasks.find((t) => t.id === b.taskId);
+      if (task && (task.status === "DONE" || task.status === "CANCELLED") && !b.completed) {
+        await localDb.scheduleBlocks.put({ ...b, completed: true, task: { ...b.task!, status: task.status } });
+      }
+    }
   }
 
   const today = await safeJson<{
@@ -182,25 +210,6 @@ export async function pullFromServer() {
   }>("/api/today");
 
   if (today) {
-    await repo.replaceSchedule(
-      today.blocks.map((b) => ({
-        id: b.id,
-        taskId: b.task.id,
-        start: typeof b.start === "string" ? b.start : new Date(b.start).toISOString(),
-        end: typeof b.end === "string" ? b.end : new Date(b.end).toISOString(),
-        completed: Boolean(b.completed),
-        task: {
-          id: b.task.id,
-          title: b.task.title,
-          priority: b.task.priority,
-          atRisk: b.task.atRisk,
-          estimateMinutes: b.task.estimateMinutes,
-          status: b.task.status,
-          emoji: b.task.emoji ?? null,
-          bucket: b.task.bucket ?? null,
-        },
-      }))
-    );
     await localDb.backlog.clear();
     if (today.backlog?.length) {
       await localDb.backlog.bulkPut(
@@ -221,28 +230,48 @@ export async function pullFromServer() {
   }>("/api/calendar?days=21");
 
   if (cal) {
-    if (cal.blocks?.length) {
-      await repo.replaceSchedule(
-        cal.blocks.map((b) => ({
-          id: b.id,
-          taskId: b.task.id,
-          start: typeof b.start === "string" ? b.start : new Date(b.start).toISOString(),
-          end: typeof b.end === "string" ? b.end : new Date(b.end).toISOString(),
-          completed: Boolean(b.completed),
-          task: {
-            id: b.task.id,
-            title: b.task.title,
-            priority: b.task.priority,
-            atRisk: b.task.atRisk,
-            estimateMinutes: b.task.estimateMinutes,
-            status: b.task.status,
-            emoji: b.task.emoji ?? null,
-            bucket: b.task.bucket ?? null,
-          },
-        }))
-      );
-    }
+    // Always replace — including empty — so deleted tasks disappear from calendar.
+    await repo.replaceSchedule(
+      (cal.blocks ?? []).map((b) => ({
+        id: b.id,
+        taskId: b.task.id,
+        start: typeof b.start === "string" ? b.start : new Date(b.start).toISOString(),
+        end: typeof b.end === "string" ? b.end : new Date(b.end).toISOString(),
+        completed: Boolean(b.completed),
+        task: {
+          id: b.task.id,
+          title: b.task.title,
+          priority: b.task.priority,
+          atRisk: b.task.atRisk,
+          estimateMinutes: b.task.estimateMinutes,
+          status: b.task.status,
+          emoji: b.task.emoji ?? null,
+          bucket: b.task.bucket ?? null,
+        },
+      }))
+    );
     await repo.replaceMeetings(cal.meetings ?? []);
+  } else if (today?.blocks) {
+    // Calendar fetch failed — at least refresh today's blocks.
+    await repo.replaceSchedule(
+      today.blocks.map((b) => ({
+        id: b.id,
+        taskId: b.task.id,
+        start: typeof b.start === "string" ? b.start : new Date(b.start).toISOString(),
+        end: typeof b.end === "string" ? b.end : new Date(b.end).toISOString(),
+        completed: Boolean(b.completed),
+        task: {
+          id: b.task.id,
+          title: b.task.title,
+          priority: b.task.priority,
+          atRisk: b.task.atRisk,
+          estimateMinutes: b.task.estimateMinutes,
+          status: b.task.status,
+          emoji: b.task.emoji ?? null,
+          bucket: b.task.bucket ?? null,
+        },
+      }))
+    );
   }
 
   const prefsPayload = await safeJson<{ prefs: Record<string, unknown> }>("/api/prefs");
@@ -367,6 +396,19 @@ export async function flushOutbox() {
                 _localOnly: false,
               });
             }
+            // Remap any schedule blocks packed under the temporary local id.
+            const orphanBlocks = await localDb.scheduleBlocks
+              .where("taskId")
+              .equals(op.localId)
+              .toArray();
+            for (const b of orphanBlocks) {
+              await localDb.scheduleBlocks.delete(b.id);
+              await localDb.scheduleBlocks.put({
+                ...b,
+                taskId: serverId,
+                task: b.task ? { ...b.task, id: serverId } : b.task,
+              });
+            }
             if (op.checklist?.length) {
               await apiFetch(`/api/tasks/${serverId}/checklist`, {
                 method: "PUT",
@@ -386,6 +428,10 @@ export async function flushOutbox() {
             body: JSON.stringify(op.body),
           });
           if (!res.ok) throw new Error(`patch ${res.status}`);
+        } else if (op.type === "deleteTask") {
+          const res = await apiFetch(`/api/tasks/${op.taskId}`, { method: "DELETE" });
+          // 404 = already gone on server — treat as success.
+          if (!res.ok && res.status !== 404) throw new Error(`delete ${res.status}`);
         } else if (op.type === "putChecklist") {
           const res = await apiFetch(`/api/tasks/${op.taskId}/checklist`, {
             method: "PUT",
@@ -427,9 +473,13 @@ export async function flushOutbox() {
   }
 }
 
+/** Push local outbox, pull server state, then push again (e.g. after ID remap). */
 export async function saveAndSync() {
   await flushOutbox();
-  await pullFromServer();
+  if (canSyncRemote()) {
+    await pullFromServer();
+    await flushOutbox();
+  }
 }
 
 export async function bootLocalSync() {

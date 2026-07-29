@@ -6,12 +6,13 @@ import { addDays, format, startOfDay } from "date-fns";
 import { GalleryHorizontal, GalleryVertical, RefreshCw } from "lucide-react";
 import { priorityColor } from "@/lib/format";
 import {
+  useLocalAllTasks,
   useLocalMeetings,
   useLocalPrefs,
   useLocalScheduleBlocks,
 } from "@/lib/local/hooks";
 import * as repo from "@/lib/local/repo";
-import { canSyncRemote, flushOutbox, pullFromServer } from "@/lib/local/sync";
+import { saveAndSync } from "@/lib/local/sync";
 import {
   type CalendarViewMode,
   readCalendarView,
@@ -62,6 +63,7 @@ function clockMinutes(iso: string) {
 
 export default function CalendarPage() {
   const blocks = useLocalScheduleBlocks();
+  const tasks = useLocalAllTasks();
   const meetings = useLocalMeetings();
   const prefs = useLocalPrefs();
   const [scheduling, setScheduling] = useState(false);
@@ -80,23 +82,36 @@ export default function CalendarPage() {
   const breakStart = prefs?.breakStartMinutes ?? null;
   const breakEnd = prefs?.breakEndMinutes ?? null;
 
+  const taskById = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks]);
+
   const data = useMemo(
     () => ({
-      blocks: blocks.map((b) => ({
-        id: b.id,
-        start: b.start,
-        end: b.end,
-        task: {
-          id: b.task?.id ?? b.taskId,
-          title: b.task?.title ?? "Task",
-          priority: b.task?.priority ?? 3,
-          atRisk: b.task?.atRisk ?? false,
-          bucket: b.task?.bucket ?? null,
-        },
-      })),
+      blocks: blocks
+        .filter((b) => {
+          const live = taskById.get(b.taskId);
+          // Drop orphans and finished tasks — leftover ghosts after delete/complete.
+          if (!live) return false;
+          if (live.status === "DONE" || live.status === "CANCELLED") return false;
+          return true;
+        })
+        .map((b) => {
+          const live = taskById.get(b.taskId)!;
+          return {
+            id: b.id,
+            start: b.start,
+            end: b.end,
+            task: {
+              id: live.id,
+              title: live.title,
+              priority: live.priority,
+              atRisk: live.atRisk,
+              bucket: live.bucket ?? b.task?.bucket ?? null,
+            },
+          };
+        }),
       meetings,
     }),
-    [blocks, meetings]
+    [blocks, meetings, taskById]
   );
 
   type CalData = typeof data;
@@ -190,8 +205,7 @@ export default function CalendarPage() {
       const { runLocalScheduler } = await import("@/lib/local/scheduler");
       await runLocalScheduler();
       await repo.enqueue({ type: "runScheduler" });
-      await flushOutbox();
-      if (canSyncRemote()) await pullFromServer();
+      await saveAndSync();
     } finally {
       setScheduling(false);
     }

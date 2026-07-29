@@ -273,6 +273,9 @@ export async function PATCH(
         isRecurring: source.isRecurring,
         recurFreq: source.recurFreq,
         recurInterval: source.recurInterval,
+        recurByWeekdays: Array.isArray(source.recurByWeekdays)
+          ? (source.recurByWeekdays as number[])
+          : null,
         recurEndsAt: source.recurEndsAt,
         recurCount: source.recurCount,
         recurOccurrencesDone: source.recurOccurrencesDone,
@@ -287,6 +290,9 @@ export async function PATCH(
         isRecurring: source.isRecurring,
         recurFreq: source.recurFreq,
         recurInterval: source.recurInterval,
+        recurByWeekdays: Array.isArray(source.recurByWeekdays)
+          ? (source.recurByWeekdays as number[])
+          : null,
         recurEndsAt: source.recurEndsAt,
         recurCount: source.recurCount,
         recurOccurrencesDone: source.recurOccurrencesDone,
