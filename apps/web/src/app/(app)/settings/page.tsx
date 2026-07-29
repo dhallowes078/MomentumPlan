@@ -1260,11 +1260,21 @@ export default function SettingsPage() {
                             }
                           />
                         </label>
+                        <p
+                          style={{
+                            margin: 0,
+                            color: "var(--ink-muted)",
+                            fontSize: "0.85rem",
+                            gridColumn: "1 / -1",
+                          }}
+                        >
+                          Buffer leaves a gap after each scheduled block (and around meetings) so
+                          tasks don’t stack edge-to-edge. Set to 0 for no gap.
+                        </p>
                       </>
                     )}
                   </div>
-                  {workDays.length > 0 && (
-                    <div style={{ display: "grid", gap: "0.5rem" }}>
+                  <div style={{ display: "grid", gap: "0.5rem" }}>
                       <div>
                         <div style={{ fontSize: "0.85rem", fontWeight: 600 }}>
                           Hours by day
@@ -1276,11 +1286,12 @@ export default function SettingsPage() {
                             fontSize: "0.8rem",
                           }}
                         >
-                          Override specific days (e.g. more free time on weekends). Leave as the
-                          default above when a day should match.
+                          Override specific days (including weekends). Days that are off stay
+                          muted — editing hours turns that day on.
                         </p>
                       </div>
-                      {workDays.map((dow) => {
+                      {DAY_LABELS.map((label, dow) => {
+                        const on = workDays.includes(dow);
                         const dayMap: DayHoursMap =
                           (bucket
                             ? parseDayHours(bucket.dayHours)
@@ -1288,12 +1299,13 @@ export default function SettingsPage() {
                         const override = dayMap[dow];
                         const dayStart = override?.startMinutes ?? startMinutes;
                         const dayEnd = override?.endMinutes ?? endMinutes;
-                        const setDayHours = (next: DayHoursValue | null) => {
+                        const setDayHours = (next: DayHoursValue | null, turnOn = false) => {
                           const current =
                             (bucket
                               ? parseDayHours(bucket.dayHours)
                               : parseDayHours(prefs.dayHours)) ?? {};
                           const updated: DayHoursMap = { ...current };
+                          let shouldEnable = turnOn && !on;
                           if (
                             !next ||
                             (next.startMinutes === startMinutes &&
@@ -1306,10 +1318,25 @@ export default function SettingsPage() {
                             delete updated[dow];
                           } else {
                             updated[dow] = next;
+                            shouldEnable = !on;
                           }
+                          const nextDays = shouldEnable
+                            ? [...workDays, dow].sort()
+                            : workDays;
                           const serialized = serializeDayHours(updated);
-                          if (bucket) patchScheduleBucket({ dayHours: parseDayHours(serialized) });
-                          else setPrefs({ ...prefs, dayHours: parseDayHours(serialized) });
+                          const parsedHours = parseDayHours(serialized);
+                          if (bucket) {
+                            patchScheduleBucket({
+                              dayHours: parsedHours,
+                              ...(shouldEnable ? { workDays: nextDays } : {}),
+                            });
+                          } else {
+                            setPrefs({
+                              ...prefs,
+                              dayHours: parsedHours,
+                              ...(shouldEnable ? { workDays: nextDays } : {}),
+                            });
+                          }
                         };
                         return (
                           <div
@@ -1319,6 +1346,7 @@ export default function SettingsPage() {
                               gridTemplateColumns: "3.5rem 1fr 1fr auto",
                               gap: "0.4rem",
                               alignItems: "end",
+                              opacity: on ? 1 : 0.55,
                             }}
                           >
                             <span
@@ -1328,7 +1356,7 @@ export default function SettingsPage() {
                                 paddingBottom: "0.55rem",
                               }}
                             >
-                              {DAY_LABELS[dow]}
+                              {label}
                             </span>
                             <label style={{ display: "grid", gap: "0.2rem", fontSize: "0.75rem" }}>
                               Start
@@ -1342,6 +1370,9 @@ export default function SettingsPage() {
                                     startMinutes: v,
                                     endMinutes: dayEnd,
                                   });
+                                }}
+                                onFocus={() => {
+                                  if (!on) setDayHours(null, true);
                                 }}
                               />
                             </label>
@@ -1357,6 +1388,9 @@ export default function SettingsPage() {
                                     startMinutes: dayStart,
                                     endMinutes: v,
                                   });
+                                }}
+                                onFocus={() => {
+                                  if (!on) setDayHours(null, true);
                                 }}
                               />
                             </label>
@@ -1374,16 +1408,10 @@ export default function SettingsPage() {
                         );
                       })}
                     </div>
-                  )}
                 </>
               );
             })()}
-            {scheduleTarget === "default" ? (
-              <p style={{ margin: 0, color: "var(--ink-muted)", fontSize: "0.85rem" }}>
-                Buffer leaves a gap after each scheduled block (and around meetings) so tasks don’t
-                stack edge-to-edge. Set to 0 for no gap.
-              </p>
-            ) : (
+            {scheduleTarget !== "default" && (
               <p style={{ margin: 0, color: "var(--ink-muted)", fontSize: "0.85rem" }}>
                 Tasks in this bucket only pack into these hours. Clear overrides to fall back to
                 the default schedule.

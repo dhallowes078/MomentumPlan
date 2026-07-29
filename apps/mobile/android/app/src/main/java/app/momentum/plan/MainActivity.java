@@ -87,6 +87,7 @@ public class MainActivity extends BridgeActivity {
 
     final WebView webView = getBridge().getWebView();
     webView.setBackgroundColor(APP_BG);
+    webView.setOverScrollMode(android.view.View.OVER_SCROLL_NEVER);
 
     if (listenerAttached) {
       ViewCompat.requestApplyInsets(webView);
