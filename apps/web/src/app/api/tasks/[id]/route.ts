@@ -10,6 +10,7 @@ import {
   buildNextOccurrenceFields,
   shouldCreateNextOccurrence,
 } from "@/lib/recurrence";
+import { runInBackground } from "@/lib/background";
 
 const updateSchema = z.object({
   title: z.string().min(1).max(300).optional(),
@@ -367,14 +368,38 @@ export async function DELETE(
   const { id } = await ctx.params;
 
   const existing = await prisma.task.findUnique({ where: { id } });
-  if (!existing) return jsonError("Not found", 404);
+  if (!existing) return NextResponse.json({ ok: true }); // already gone
   try {
     await assertWorkspaceAccess(userId, existing.workspaceId);
   } catch {
     return jsonError("Forbidden", 403);
   }
 
-  await prisma.task.delete({ where: { id } });
-  void runSchedulerForUser(userId).catch(console.error);
+  try {
+    // D1 / Prisma often fails on parent delete when child rows remain — clear
+    // dependents explicitly instead of relying on SQL CASCADE alone.
+    await prisma.scheduleBlock.deleteMany({ where: { taskId: id } });
+    await prisma.checklistItem.deleteMany({ where: { taskId: id } });
+    await prisma.taskMention.deleteMany({ where: { taskId: id } });
+    await prisma.taskLink.deleteMany({ where: { taskId: id } });
+    await prisma.attachment.deleteMany({ where: { taskId: id } });
+    await prisma.comment.deleteMany({ where: { taskId: id } });
+    await prisma.taskEvent.deleteMany({ where: { taskId: id } });
+    await prisma.task.delete({ where: { id } });
+  } catch (err) {
+    const code =
+      err && typeof err === "object" && "code" in err
+        ? String((err as { code: unknown }).code)
+        : "";
+    // P2025 = record already deleted
+    if (code === "P2025") return NextResponse.json({ ok: true });
+    console.error("[tasks DELETE]", id, err);
+    return jsonError(
+      err instanceof Error ? `Delete failed: ${err.message}` : "Delete failed",
+      500
+    );
+  }
+
+  runInBackground(runSchedulerForUser(userId));
   return NextResponse.json({ ok: true });
 }

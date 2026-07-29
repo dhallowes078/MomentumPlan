@@ -715,6 +715,11 @@ export async function flushOutbox() {
             throw new Error(syncFailMessage("patch", res, errBody));
           }
         } else if (op.type === "deleteTask") {
+          // Never try to DELETE temporary local ids on the server.
+          if (String(op.taskId).startsWith("local")) {
+            await localDb.outbox.delete(item.id);
+            continue;
+          }
           const res = await apiFetch(`/api/tasks/${op.taskId}`, { method: "DELETE" });
           // 404 = already gone on server — treat as success.
           if (!res.ok && res.status !== 404) {

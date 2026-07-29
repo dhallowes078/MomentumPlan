@@ -14,6 +14,13 @@ export type ChangelogEntry = {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.3.5",
+    date: "2026-07-30",
+    changes: [
+      "Fixed Sync issue delete 500 — task delete now clears related schedule/comments/etc. before removing the task",
+    ],
+  },
+  {
     version: "0.3.4",
     date: "2026-07-30",
     changes: [
