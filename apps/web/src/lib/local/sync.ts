@@ -659,6 +659,12 @@ export async function flushOutbox() {
           });
           if (!res.ok) {
             const errBody = await res.json().catch(() => null);
+            // 403 after remap = not our workspace — drop create so sync can continue.
+            if (res.status === 403) {
+              await dropLocalTaskAndBlocks(op.localId);
+              await localDb.outbox.delete(item.id);
+              continue;
+            }
             throw new Error(syncFailMessage("create", res, errBody));
           }
           const data = await res.json();
@@ -701,15 +707,22 @@ export async function flushOutbox() {
             }
           }
         } else if (op.type === "patchTask") {
+          if (String(op.taskId).startsWith("local")) {
+            // Never synced — patch is meaningless on the server; drop it.
+            await localDb.outbox.delete(item.id);
+            continue;
+          }
+          const body = { ...op.body };
+          if (typeof body.bucketId === "string" && body.bucketId.startsWith("local")) {
+            body.bucketId = null;
+          }
           const res = await apiFetch(`/api/tasks/${op.taskId}`, {
             method: "PATCH",
-            body: JSON.stringify(op.body),
+            body: JSON.stringify(body),
           });
-          if (res.status === 404) {
-            // Server already gone — drop local ghost + related blocks.
-            await localDb.tasks.delete(op.taskId);
-            const orphans = await localDb.scheduleBlocks.where("taskId").equals(op.taskId).toArray();
-            for (const b of orphans) await localDb.scheduleBlocks.delete(b.id);
+          if (res.status === 404 || res.status === 403) {
+            // Gone or not ours — drop ghost so one bad patch cannot block the whole queue.
+            await dropLocalTaskAndBlocks(op.taskId);
           } else if (!res.ok) {
             const errBody = await res.json().catch(() => null);
             throw new Error(syncFailMessage("patch", res, errBody));
@@ -721,8 +734,8 @@ export async function flushOutbox() {
             continue;
           }
           const res = await apiFetch(`/api/tasks/${op.taskId}`, { method: "DELETE" });
-          // 404 = already gone on server — treat as success.
-          if (!res.ok && res.status !== 404) {
+          // 404/403 = already gone or not ours — treat as success.
+          if (!res.ok && res.status !== 404 && res.status !== 403) {
             const errBody = await res.json().catch(() => null);
             throw new Error(syncFailMessage("delete", res, errBody));
           }
@@ -747,6 +760,11 @@ export async function flushOutbox() {
           });
           if (!res.ok) {
             const errBody = await res.json().catch(() => null);
+            if (res.status === 403) {
+              // Drop orphan bucket create for a workspace we can't access.
+              await localDb.outbox.delete(item.id);
+              continue;
+            }
             throw new Error(syncFailMessage("createBucket", res, errBody));
           }
           const data = await res.json();
@@ -847,7 +865,30 @@ export async function flushOutbox() {
   }
 }
 
-/** Push local outbox, pull server state, then push again (e.g. after ID remap). */
+async function dropLocalTaskAndBlocks(taskId: string) {
+  await localDb.tasks.delete(taskId);
+  const orphans = await localDb.scheduleBlocks.where("taskId").equals(taskId).toArray();
+  for (const b of orphans) await localDb.scheduleBlocks.delete(b.id);
+  await localDb.backlog.delete(taskId).catch(() => undefined);
+}
+
+/** Clear queued sync ops — used on re-link so stale patches from another account stop 403-looping. */
+export async function clearSyncOutbox() {
+  await localDb.outbox.clear();
+  emit();
+}
+
+/**
+ * After signing in / linking a device: drop stale outbox, pull this account's data, then flush.
+ * Prevents patch 403 loops from leftover edits owned by a previous identity.
+ */
+export async function syncAfterDeviceLink() {
+  await clearSyncOutbox();
+  if (canSyncRemote()) {
+    await pullFromServer();
+    await flushOutbox();
+  }
+}
 export async function saveAndSync() {
   if (canSyncRemote()) {
     // Remap offline workspace ids before attempting creates (prevents 403).

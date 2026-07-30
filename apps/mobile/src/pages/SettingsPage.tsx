@@ -5,7 +5,7 @@ import {
   getDeviceToken,
   setDeviceToken,
 } from "@/lib/sync-api";
-import { flushOutbox, pullFromServer, useSyncIndicator } from "./settings-helpers";
+import { flushOutbox, useSyncIndicator } from "./settings-helpers";
 import { requestNotificationPermission, rescheduleTaskNotifications } from "@/lib/local/notifications";
 import * as repo from "@/lib/local/repo";
 
@@ -28,8 +28,8 @@ export function SettingsPage() {
       if (!res.ok) throw new Error("Invalid code or server unreachable");
       const data = await res.json();
       setDeviceToken(data.token);
-      await pullFromServer();
-      await flushOutbox();
+      const { syncAfterDeviceLink } = await import("@/lib/local/sync");
+      await syncAfterDeviceLink();
       setMessage("Device linked and synced");
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "Link failed");

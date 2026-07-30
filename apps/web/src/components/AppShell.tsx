@@ -40,6 +40,23 @@ function SyncBadge() {
 
   async function onTap() {
     if (status === "error" && lastError) {
+      const lower = lastError.toLowerCase();
+      const stuckAuth =
+        lower.includes("403") ||
+        lower.includes("forbidden") ||
+        lower.includes("no access");
+      if (stuckAuth) {
+        const clear = window.confirm(
+          `Sync issue\n\n${lastError}\n\nThis usually means a leftover edit for a task this account can’t access.\n\nOK = clear stuck sync queue and retry\nCancel = dismiss`
+        );
+        if (clear) {
+          const { clearSyncOutbox, saveAndSync } = await import("@/lib/local/sync");
+          await clearSyncOutbox();
+          await saveAndSync();
+          return;
+        }
+        return;
+      }
       const retry = window.confirm(
         `Sync issue\n\n${lastError}\n\nTap OK to retry sync now.\n(Screenshot this message if it keeps failing.)`
       );

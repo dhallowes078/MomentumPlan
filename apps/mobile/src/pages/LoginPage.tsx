@@ -1,11 +1,10 @@
 import { useEffect, useState } from "react";
 import { apiUrl, setDeviceToken, clearStoredSyncApiBase, getSyncApiBase } from "@/lib/sync-api";
-import { pullFromServer, flushOutbox } from "@/lib/local/sync";
+import { syncAfterDeviceLink } from "@/lib/local/sync";
 
 async function finishWithToken(token: string, onLinked: () => void) {
   setDeviceToken(token);
-  await pullFromServer();
-  await flushOutbox();
+  await syncAfterDeviceLink();
   const probe = await fetch(apiUrl("/api/workspaces"), {
     headers: { Authorization: `Bearer ${token}` },
   });

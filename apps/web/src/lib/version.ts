@@ -14,6 +14,15 @@ export type ChangelogEntry = {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.3.6",
+    date: "2026-07-30",
+    changes: [
+      "Fixed Sync issue patch 403 loop — leftover edits for tasks you can’t access are dropped instead of blocking sync forever",
+      "Re-linking / signing in clears the stuck sync queue first",
+      "Tap Sync issue on a 403 to clear the queue and retry",
+    ],
+  },
+  {
     version: "0.3.5",
     date: "2026-07-30",
     changes: [
