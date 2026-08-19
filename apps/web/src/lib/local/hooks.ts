@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { liveQuery } from "dexie";
-import { localDb, type LocalPrefs, type LocalScheduleBlock, type LocalTask, type LocalWorkspace } from "./db";
+import { localDb, type LocalChecklist, type LocalPrefs, type LocalScheduleBlock, type LocalTask, type LocalWorkspace } from "./db";
 import * as repo from "./repo";
 import { bootLocalSync, saveAndSync, subscribeSync, todayWindow } from "./sync";
 
@@ -103,4 +103,12 @@ export function useLocalAllTasks() {
 
 export function useLocalTask(id: string) {
   return useLiveQuery(() => repo.getTask(id), undefined as LocalTask | undefined, [id]);
+}
+
+export function useLocalChecklists(workspaceId: string) {
+  return useLiveQuery(
+    () => (workspaceId ? repo.listChecklists(workspaceId) : Promise.resolve([] as LocalChecklist[])),
+    [] as LocalChecklist[],
+    [workspaceId]
+  );
 }

@@ -344,10 +344,14 @@ export default function TasksPage() {
                   borderLeft: t.bucket ? `4px solid ${t.bucket.color}` : undefined,
                   transition: "transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease",
                   ["--fade-color" as string]: fadeColor,
-                  ["--fade-image" as string]: mediaSrc ? `url("${mediaSrc}")` : undefined,
                 } as React.CSSProperties
               }
             >
+              {mediaSrc ? (
+                <div className="task-fade-photo" aria-hidden>
+                  <img src={mediaSrc} alt="" />
+                </div>
+              ) : null}
               {canReorder ? (
                 <span
                   draggable

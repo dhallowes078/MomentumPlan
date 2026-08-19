@@ -1,5 +1,5 @@
 import { startOfDay, endOfDay } from "date-fns";
-import { localDb, setMeta, type LocalTask, type LocalWorkspace } from "./db";
+import { localDb, setMeta, type LocalChecklist, type LocalTask, type LocalWorkspace } from "./db";
 import * as repo from "./repo";
 import { apiFetch, apiUrl, getDeviceToken, getSyncApiBase } from "@/lib/sync-api";
 import { parseDayHours } from "@/lib/day-hours";
@@ -88,6 +88,12 @@ async function migrateOfflineWorkspaceRefs(targetWorkspaceId: string) {
     await localDb.tasks.put({ ...t, workspaceId: targetWorkspaceId });
   }
 
+  const lists = await localDb.checklists.toArray();
+  for (const row of lists) {
+    if (!offlineIds.has(row.workspaceId) && !row.workspaceId.startsWith("local")) continue;
+    await localDb.checklists.put({ ...row, workspaceId: targetWorkspaceId });
+  }
+
   const outbox = await localDb.outbox.toArray();
   for (const row of outbox) {
     const op = row.op;
@@ -107,6 +113,16 @@ async function migrateOfflineWorkspaceRefs(targetWorkspaceId: string) {
         ...row,
         op: { ...op, workspaceId: targetWorkspaceId },
       });
+    } else if (op.type === "upsertChecklist") {
+      if (!op.workspaceId.startsWith("local") && !offlineIds.has(op.workspaceId)) continue;
+      await localDb.outbox.put({
+        ...row,
+        op: { ...op, workspaceId: targetWorkspaceId },
+      });
+      const local = await localDb.checklists.get(op.id);
+      if (local && local.workspaceId !== targetWorkspaceId) {
+        await localDb.checklists.put({ ...local, workspaceId: targetWorkspaceId });
+      }
     }
   }
 }
@@ -157,6 +173,31 @@ function sanitizeCreateTaskBody(body: Record<string, unknown>, userIdHint?: stri
   }
 
   return out;
+}
+
+function parseChecklistItems(raw: unknown): LocalChecklist["items"] {
+  if (Array.isArray(raw)) return raw as LocalChecklist["items"];
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+function normalizeChecklist(row: Record<string, unknown>): LocalChecklist {
+  return {
+    id: String(row.id),
+    workspaceId: String(row.workspaceId),
+    title: String(row.title ?? "Checklist"),
+    items: parseChecklistItems(row.items),
+    position: Number(row.position ?? 0),
+    updatedAt: row.updatedAt ? String(row.updatedAt) : new Date().toISOString(),
+    _localOnly: false,
+  };
 }
 
 async function safeJson<T>(path: string, init?: RequestInit): Promise<T | null> {
@@ -323,6 +364,7 @@ export async function pullFromServer() {
   const outboxItems = await localDb.outbox.toArray();
   const protectedTaskIds = new Set<string>();
   const pendingPatchIds = new Set<string>();
+  const pendingChecklistIds = new Set<string>();
   let pendingPrefs = false;
   for (const item of outboxItems) {
     const op = item.op;
@@ -331,6 +373,8 @@ export async function pullFromServer() {
     // Unflushed edits must not be overwritten by a stale server snapshot.
     if (op.type === "patchTask") pendingPatchIds.add(op.taskId);
     if (op.type === "putChecklist") pendingPatchIds.add(op.taskId);
+    if (op.type === "upsertChecklist") pendingChecklistIds.add(op.id);
+    if (op.type === "deleteChecklist") pendingChecklistIds.add(op.id);
     if (op.type === "reorder") {
       for (const id of op.orderedTaskIds) pendingPatchIds.add(id);
     }
@@ -367,6 +411,27 @@ export async function pullFromServer() {
         for (const b of orphans) await localDb.scheduleBlocks.delete(b.id);
       }
     });
+
+    const lists = await safeJson<{ checklists: Record<string, unknown>[] }>(
+      `/api/checklists?${new URLSearchParams({ workspaceId: ws.id })}`
+    );
+    if (lists && Array.isArray(lists.checklists)) {
+      const serverLists = lists.checklists.map(normalizeChecklist);
+      const existingLists = await localDb.checklists.where("workspaceId").equals(ws.id).toArray();
+      for (const row of existingLists) {
+        if (
+          row.id.startsWith("local_list_") ||
+          pendingChecklistIds.has(row.id) ||
+          serverLists.some((s) => s.id === row.id)
+        ) {
+          continue;
+        }
+        await localDb.checklists.delete(row.id);
+      }
+      await localDb.checklists.bulkPut(
+        serverLists.filter((row) => !pendingChecklistIds.has(row.id))
+      );
+    }
   }
 
   // Drop tasks that belong to workspaces we no longer have (old offline seeds, etc.).
@@ -625,6 +690,9 @@ async function runFlushOutbox(): Promise<Record<string, string>> {
       if (row.op.type === "createBucket") {
         return row.op.workspaceId.startsWith("local");
       }
+      if (row.op.type === "upsertChecklist") {
+        return row.op.workspaceId.startsWith("local");
+      }
       return false;
     });
     const hasServerWs = (await localDb.workspaces.toArray()).some(
@@ -653,7 +721,8 @@ async function runFlushOutbox(): Promise<Record<string, string>> {
 
     // Prefer createBucket before task ops so local_bucket_* ids remap first.
     const items = (await localDb.outbox.orderBy("createdAt").toArray()).sort((a, b) => {
-      const rank = (t: string) => (t === "createBucket" ? 0 : t === "createTask" ? 1 : 2);
+      const rank = (t: string) =>
+        t === "createBucket" ? 0 : t === "upsertChecklist" ? 1 : t === "createTask" ? 2 : 3;
       const d = rank(a.op.type) - rank(b.op.type);
       return d !== 0 ? d : a.createdAt - b.createdAt;
     });
@@ -881,6 +950,74 @@ async function runFlushOutbox(): Promise<Record<string, string>> {
             body: JSON.stringify({ items: op.items }),
           });
           if (!res.ok) throw new Error(`checklist ${res.status}`);
+        } else if (op.type === "upsertChecklist") {
+          const wsId = await canonicalWorkspaceId(op.workspaceId);
+          if (!wsId) {
+            throw new Error("checklist blocked: no server workspace yet — pull to refresh");
+          }
+          const localId = op.id;
+          const isLocal = localId.startsWith("local_list_");
+          const body = {
+            workspaceId: wsId,
+            title: op.title,
+            items: op.items,
+            position: op.position,
+          };
+          const res = isLocal
+            ? await apiFetch("/api/checklists", {
+                method: "POST",
+                body: JSON.stringify(body),
+              })
+            : await apiFetch(`/api/checklists/${localId}`, {
+                method: "PATCH",
+                body: JSON.stringify(body),
+              });
+          if (!res.ok) {
+            const errBody = await res.json().catch(() => null);
+            if (res.status === 403) {
+              await localDb.outbox.delete(item.id);
+              continue;
+            }
+            throw new Error(syncFailMessage(isLocal ? "checklist create" : "checklist", res, errBody));
+          }
+          const data = await res.json();
+          const serverId = data.checklist?.id as string | undefined;
+          if (isLocal && serverId) {
+            const local = await localDb.checklists.get(localId);
+            if (local) {
+              await localDb.checklists.delete(localId);
+              await localDb.checklists.put({
+                ...local,
+                id: serverId,
+                workspaceId: wsId,
+                _localOnly: false,
+              });
+            }
+            const pending = await localDb.outbox.toArray();
+            for (const row of pending) {
+              if (row.op.type === "upsertChecklist" && row.op.id === localId) {
+                await localDb.outbox.put({
+                  ...row,
+                  op: { ...row.op, id: serverId, workspaceId: wsId },
+                });
+              } else if (row.op.type === "deleteChecklist" && row.op.id === localId) {
+                await localDb.outbox.put({
+                  ...row,
+                  op: { ...row.op, id: serverId },
+                });
+              }
+            }
+          }
+        } else if (op.type === "deleteChecklist") {
+          if (op.id.startsWith("local_list_")) {
+            await localDb.outbox.delete(item.id);
+            continue;
+          }
+          const res = await apiFetch(`/api/checklists/${op.id}`, { method: "DELETE" });
+          if (!res.ok && res.status !== 404 && res.status !== 403) {
+            const errBody = await res.json().catch(() => null);
+            throw new Error(syncFailMessage("checklist delete", res, errBody));
+          }
         } else if (op.type === "reorder") {
           const updates = op.orderedTaskIds
             .map((origId) => idMap[origId] ?? origId)

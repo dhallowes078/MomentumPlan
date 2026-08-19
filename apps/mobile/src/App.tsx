@@ -4,6 +4,7 @@ import { AppShell } from "@/components/AppShell";
 import { Providers } from "@/components/Providers";
 import { TodayView } from "@/components/TodayView";
 import TasksPage from "@/app/(app)/tasks/page";
+import ChecklistsPage from "@/app/(app)/checklists/page";
 import CalendarPage from "@/app/(app)/calendar/page";
 import SettingsPage from "@/app/(app)/settings/page";
 import TaskDetailPage from "@/app/(app)/tasks/[id]/page";
@@ -21,6 +22,7 @@ function FullApp() {
           <Route path="/today" element={<TodayView />} />
           <Route path="/tasks" element={<TasksPage />} />
           <Route path="/tasks/:id" element={<TaskDetailPage />} />
+          <Route path="/checklists" element={<ChecklistsPage />} />
           <Route path="/calendar" element={<CalendarPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/today" replace />} />

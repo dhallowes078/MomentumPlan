@@ -6,10 +6,8 @@ import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft,
   Check,
-  Link2,
   Lock,
   Paperclip,
-  Plus,
   Send,
   Trash2,
   Unlock,
@@ -25,10 +23,10 @@ import { AssigneeSelect } from "@/components/AssigneeSelect";
 import { FileButton } from "@/components/FileButton";
 import { EmojiPicker } from "@/components/EmojiPicker";
 import { RecurWeekdayPicker } from "@/components/RecurWeekdayPicker";
-import { ChecklistEditor } from "@/components/ChecklistEditor";
+import { NotesEditor, isEmptyNotesHtml } from "@/components/NotesEditor";
 import { cachedJson, invalidateClientCache } from "@/lib/client-fetch";
 import * as localRepo from "@/lib/local/repo";
-import { resolveMediaUrl } from "@/lib/sync-api";
+import { apiFetch, apiUpload, resolveMediaUrl } from "@/lib/sync-api";
 
 type Member = {
   id: string;
@@ -155,25 +153,6 @@ function toDraft(task: TaskDetail): TaskDraft {
   };
 }
 
-function checklistSnapshot(items: ChecklistItem[]) {
-  return items.map((c) => ({
-    id: c.id,
-    text: c.text,
-    done: c.done,
-    position: c.position,
-  }));
-}
-
-function sameChecklist(a: ChecklistItem[], b: ChecklistItem[]) {
-  if (a.length !== b.length) return false;
-  return a.every(
-    (item, i) =>
-      item.text === b[i].text &&
-      item.done === b[i].done &&
-      (item.id ?? "") === (b[i].id ?? "")
-  );
-}
-
 function sameMentions(a: string[], b: string[]) {
   if (a.length !== b.length) return false;
   const as = [...a].sort();
@@ -184,7 +163,9 @@ function sameMentions(a: string[], b: string[]) {
 function draftPatchBody(draft: TaskDraft, baseline: TaskDraft) {
   const body: Record<string, unknown> = {};
   if (draft.title !== baseline.title) body.title = draft.title.trim() || baseline.title;
-  if (draft.notes !== baseline.notes) body.notes = draft.notes || null;
+  if (draft.notes !== baseline.notes) {
+    body.notes = draft.notes.trim() && !isEmptyNotesHtml(draft.notes) ? draft.notes : null;
+  }
   if (draft.priority !== baseline.priority) body.priority = draft.priority;
   if (draft.estimateMinutes !== baseline.estimateMinutes) {
     body.estimateMinutes = Math.max(5, Number(draft.estimateMinutes) || 5);
@@ -253,9 +234,6 @@ export default function TaskDetailPage() {
   const [members, setMembers] = useState<Member[]>([]);
   const [buckets, setBuckets] = useState<{ id: string; name: string; color: string }[]>([]);
   const [comment, setComment] = useState("");
-  const [linkUrl, setLinkUrl] = useState("");
-  const [checklist, setChecklist] = useState<ChecklistItem[]>([]);
-  const [baselineChecklist, setBaselineChecklist] = useState<ChecklistItem[]>([]);
   const [mentionIds, setMentionIds] = useState<string[]>([]);
   const [baselineMentions, setBaselineMentions] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
@@ -283,9 +261,6 @@ export default function TaskDetailPage() {
     setTask(loaded);
     setDraft(nextDraft);
     setBaseline(nextDraft);
-    const items = checklistSnapshot(loaded.checklistItems ?? []);
-    setChecklist(items);
-    setBaselineChecklist(items);
     const mentions = (loaded.mentions ?? []).map((m) => m.userId);
     setMentionIds(mentions);
     setBaselineMentions(mentions);
@@ -384,11 +359,10 @@ export default function TaskDetailPage() {
     void load();
   }, [load]);
 
-  const checklistDirty = !sameChecklist(checklist, baselineChecklist);
   const mentionsDirty = !sameMentions(mentionIds, baselineMentions);
   const draftDirty =
     draft && baseline ? JSON.stringify(draft) !== JSON.stringify(baseline) : false;
-  const dirty = Boolean(draftDirty || checklistDirty || mentionsDirty);
+  const dirty = Boolean(draftDirty || mentionsDirty);
 
   function updateDraft(patch: Partial<TaskDraft>) {
     setDraft((prev) => (prev ? { ...prev, ...patch } : prev));
@@ -415,14 +389,6 @@ export default function TaskDetailPage() {
           emoji: (body.emoji as string | null) ?? draft.emoji,
           headerImageKey: (body.headerImageKey as string | null) ?? draft.headerImageKey,
         }, body);
-      }
-
-      if (checklistDirty) {
-        await localRepo.enqueue({
-          type: "putChecklist",
-          taskId: String(params.id),
-          items: checklist,
-        });
       }
 
       const { saveAndSync } = await import("@/lib/local/sync");
@@ -481,31 +447,18 @@ export default function TaskDetailPage() {
   async function addComment(e: React.FormEvent) {
     e.preventDefault();
     if (!comment.trim()) return;
-    await fetch(`/api/tasks/${params.id}/comments`, {
+    await apiFetch(`/api/tasks/${params.id}/comments`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ body: comment }),
     });
     setComment("");
     await load();
   }
 
-  async function addLink(e: React.FormEvent) {
-    e.preventDefault();
-    if (!linkUrl.trim()) return;
-    await fetch(`/api/tasks/${params.id}/links`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: linkUrl }),
-    });
-    setLinkUrl("");
-    await load();
-  }
-
   async function upload(file: File) {
     const fd = new FormData();
     fd.set("file", file);
-    const res = await fetch(`/api/tasks/${params.id}/attachments`, { method: "POST", body: fd });
+    const res = await apiUpload(`/api/tasks/${params.id}/attachments`, fd);
     if (!res.ok) return;
     await load();
   }
@@ -513,10 +466,14 @@ export default function TaskDetailPage() {
   async function uploadHeader(file: File) {
     const fd = new FormData();
     fd.set("file", file);
-    const res = await fetch(`/api/tasks/${params.id}/header`, { method: "POST", body: fd });
+    const res = await apiUpload(`/api/tasks/${params.id}/header`, fd);
     if (!res.ok) return;
     const data = await res.json();
     updateDraft({
+      headerImageKey: data.headerImageKey ?? null,
+      headerImageUrl: data.headerImageUrl ?? null,
+    });
+    await localRepo.patchLocalTask(String(params.id), {
       headerImageKey: data.headerImageKey ?? null,
       headerImageUrl: data.headerImageUrl ?? null,
     });
@@ -527,9 +484,8 @@ export default function TaskDetailPage() {
     if (!task || !draft) return;
     const name = window.prompt("Template name?");
     if (!name?.trim()) return;
-    await fetch("/api/templates", {
+    await apiFetch("/api/templates", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         workspaceId: task.workspaceId,
         name: name.trim(),
@@ -539,11 +495,6 @@ export default function TaskDetailPage() {
         estimateMinutes: Math.max(5, Number(draft.estimateMinutes) || 5),
         bucketId: draft.bucketId,
         headerImageKey: draft.headerImageKey,
-        checklist: checklist.map((c) => ({ text: c.text, done: c.done })),
-        links: task.links.map((l) => ({
-          url: l.url,
-          title: l.title ?? undefined,
-        })),
       }),
     });
   }
@@ -556,11 +507,10 @@ export default function TaskDetailPage() {
     );
   }
 
-  const headerBackground = draft.headerImageUrl
-    ? `center/cover no-repeat url(${resolveMediaUrl(draft.headerImageUrl)})`
-    : draft.bucket
-      ? `linear-gradient(135deg, ${draft.bucket.color}, color-mix(in srgb, ${draft.bucket.color} 55%, var(--accent)))`
-      : "linear-gradient(135deg, color-mix(in srgb, var(--brand) 35%, transparent), color-mix(in srgb, var(--accent) 22%, transparent))";
+  const headerMedia = resolveMediaUrl(draft.headerImageUrl);
+  const headerFallback = draft.bucket
+    ? `linear-gradient(135deg, ${draft.bucket.color}, color-mix(in srgb, ${draft.bucket.color} 55%, var(--accent)))`
+    : "linear-gradient(135deg, color-mix(in srgb, var(--brand) 35%, transparent), color-mix(in srgb, var(--accent) 22%, transparent))";
 
   const chunks = task.scheduleBlocks ?? [];
   const recurLabel = describeRecurrence({
@@ -619,17 +569,33 @@ export default function TaskDetailPage() {
       <section className="card" style={{ padding: 0, overflow: "hidden", display: "grid", gap: 0 }}>
         <div
           style={{
-            minHeight: draft.headerImageUrl ? 96 : 72,
-            background: headerBackground,
+            minHeight: headerMedia ? 120 : 72,
+            background: headerFallback,
             position: "relative",
+            overflow: "hidden",
           }}
         >
+          {headerMedia ? (
+            <img
+              src={headerMedia}
+              alt=""
+              style={{
+                position: "absolute",
+                inset: 0,
+                width: "100%",
+                height: "100%",
+                objectFit: "cover",
+                objectPosition: "center",
+              }}
+            />
+          ) : null}
           <div
             style={{
               position: "absolute",
               left: "50%",
               bottom: "0.75rem",
               transform: "translateX(-50%)",
+              zIndex: 1,
             }}
           >
             <FileButton
@@ -702,12 +668,9 @@ export default function TaskDetailPage() {
             </label>
           </div>
 
-          <textarea
-            className="field"
-            rows={4}
-            placeholder="Notes"
+          <NotesEditor
             value={draft.notes}
-            onChange={(e) => updateDraft({ notes: e.target.value })}
+            onChange={(notes) => updateDraft({ notes })}
           />
 
           <div style={{ display: "flex", flexWrap: "wrap", gap: "0.45rem" }}>
@@ -883,55 +846,6 @@ export default function TaskDetailPage() {
         </section>
       )}
 
-      <ChecklistEditor
-        items={checklist}
-        onChange={setChecklist}
-        meta={
-          <>
-            <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
-              Bucket
-              <BucketSelect
-                buckets={buckets}
-                value={draft.bucketId ?? ""}
-                onChange={(id) => {
-                  updateDraft({
-                    bucketId: id || null,
-                    bucket: buckets.find((b) => b.id === id) ?? null,
-                  });
-                }}
-              />
-            </label>
-            <div>
-              <div style={{ fontSize: "0.85rem", marginBottom: "0.35rem" }}>Priority</div>
-              <PriorityButtons
-                value={draft.priority}
-                onChange={(priority) => updateDraft({ priority })}
-              />
-            </div>
-            {!draft.locked && (
-              <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
-                Due date
-                <DueDatePicker
-                  value={draft.dueAt ? draft.dueAt.slice(0, 10) : ""}
-                  onChange={(due) => {
-                    const dueAt = due ? new Date(`${due}T17:00:00`).toISOString() : null;
-                    updateDraft({ dueAt });
-                  }}
-                />
-              </label>
-            )}
-            <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
-              Assignee
-              <AssigneeSelect
-                members={members}
-                value={draft.assigneeId ?? ""}
-                onChange={(id) => updateDraft({ assigneeId: id || null })}
-              />
-            </label>
-          </>
-        }
-      />
-
       <section className="card" style={{ padding: "1rem", display: "grid", gap: "0.75rem" }}>
         <h2 style={{ margin: 0, fontSize: "1rem" }}>Tag members</h2>
         <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem" }}>
@@ -970,34 +884,12 @@ export default function TaskDetailPage() {
 
       <section className="card" style={{ padding: "1rem", display: "grid", gap: "0.75rem" }}>
         <h2 style={{ margin: 0, fontSize: "1rem", display: "flex", gap: "0.4rem", alignItems: "center" }}>
-          <Link2 size={16} /> Links
-        </h2>
-        {task.links.map((l) => (
-          <a key={l.id} href={l.url} target="_blank" rel="noreferrer" style={{ color: "var(--brand)" }}>
-            {l.title || l.url}
-          </a>
-        ))}
-        <form onSubmit={addLink} style={{ display: "flex", gap: "0.4rem" }}>
-          <input
-            className="field"
-            placeholder="https://"
-            value={linkUrl}
-            onChange={(e) => setLinkUrl(e.target.value)}
-          />
-          <button className="btn secondary" type="submit">
-            Add
-          </button>
-        </form>
-      </section>
-
-      <section className="card" style={{ padding: "1rem", display: "grid", gap: "0.75rem" }}>
-        <h2 style={{ margin: 0, fontSize: "1rem", display: "flex", gap: "0.4rem", alignItems: "center" }}>
           <Paperclip size={16} /> Documents
         </h2>
         {task.attachments.map((a) => (
           <a
             key={a.id}
-            href={a.url ?? `/api/attachments/file?key=${encodeURIComponent(a.storageKey.replace(/^local:/, ""))}`}
+            href={resolveMediaUrl(a.url) ?? `/api/attachments/file?key=${encodeURIComponent(a.storageKey.replace(/^local:/, ""))}`}
             target="_blank"
             rel="noreferrer"
             style={{ fontSize: "0.9rem", color: "var(--brand)" }}

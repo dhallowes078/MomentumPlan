@@ -10,7 +10,7 @@ import { runInBackground } from "@/lib/background";
 const createSchema = z.object({
   workspaceId: z.string().min(1),
   title: z.string().min(1).max(300),
-  notes: z.string().optional().nullable(),
+  notes: z.string().max(50_000).optional().nullable(),
   priority: z.number().int().min(1).max(5).optional(),
   estimateMinutes: z.number().int().min(5).max(8 * 60).optional(),
   dueAt: z.string().datetime({ offset: true }).optional().nullable(),

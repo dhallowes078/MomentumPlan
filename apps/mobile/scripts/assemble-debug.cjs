@@ -2,6 +2,21 @@ const { spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 
+function readAppVersion() {
+  const versionFile = path.join(__dirname, "..", "..", "web", "src", "lib", "version.ts");
+  const src = fs.readFileSync(versionFile, "utf8");
+  const match = src.match(/version:\s*"([^"]+)"/);
+  return match?.[1] ?? "0.0.0";
+}
+
+function versionCodeFromSemver(version) {
+  const [maj, min, pat] = version.split(".").map((n) => parseInt(n, 10) || 0);
+  return maj * 10000 + min * 100 + pat;
+}
+
+const appVersion = readAppVersion();
+const versionCode = versionCodeFromSemver(appVersion);
+
 const candidates = [
   process.env.JAVA_HOME,
   "C:\\Program Files\\Eclipse Adoptium\\jdk-21.0.11.10-hotspot",
@@ -29,19 +44,27 @@ const env = {
   Path: `${path.join(javaHome, "bin")};${process.env.Path || process.env.PATH || ""}`,
 };
 
-const result = spawnSync(path.join(androidDir, "gradlew.bat"), ["assembleDebug"], {
-  cwd: androidDir,
-  env,
-  stdio: "inherit",
-  shell: true,
-});
+const result = spawnSync(
+  path.join(androidDir, "gradlew.bat"),
+  ["assembleDebug", `-PappVersionName=${appVersion}`, `-PappVersionCode=${versionCode}`],
+  {
+    cwd: androidDir,
+    env,
+    stdio: "inherit",
+    shell: true,
+  }
+);
 
 if ((result.status ?? 1) !== 0) {
   process.exit(result.status ?? 1);
 }
 
 const builtApk = path.join(androidDir, "app", "build", "outputs", "apk", "debug", "app-debug.apk");
-const destApk = path.join(__dirname, "..", "..", "..", "Momentum-debug.apk");
+const repoRoot = path.join(__dirname, "..", "..", "..");
+const versionedApk = path.join(repoRoot, `Momentum-${appVersion}-debug.apk`);
+const destApk = path.join(repoRoot, "Momentum-debug.apk");
+fs.copyFileSync(builtApk, versionedApk);
 fs.copyFileSync(builtApk, destApk);
-console.log(`Copied APK to ${destApk}`);
+console.log(`Copied APK to ${versionedApk}`);
+console.log(`Also copied to ${destApk}`);
 process.exit(0);

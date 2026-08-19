@@ -14,7 +14,7 @@ import { runInBackground } from "@/lib/background";
 
 const updateSchema = z.object({
   title: z.string().min(1).max(300).optional(),
-  notes: z.string().nullable().optional(),
+  notes: z.string().max(50_000).nullable().optional(),
   priority: z.number().int().min(1).max(5).optional(),
   estimateMinutes: z.number().int().min(5).max(8 * 60).optional(),
   dueAt: z.string().datetime().nullable().optional(),

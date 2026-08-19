@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
-import { ImagePlus, Link2, Paperclip, Plus, Trash2, X } from "lucide-react";
+import { ImagePlus, Paperclip, Trash2, X } from "lucide-react";
 import { useThemePrefs } from "@/components/ThemeProvider";
 import { PriorityButtons } from "@/components/PriorityButtons";
 import { BucketSelect } from "@/components/BucketSelect";
@@ -11,11 +11,11 @@ import { DueDatePicker } from "@/components/DueDatePicker";
 import { AssigneeSelect } from "@/components/AssigneeSelect";
 import { FileButton } from "@/components/FileButton";
 import { EmojiPicker } from "@/components/EmojiPicker";
-import { createLocalTask, listWorkspaces } from "@/lib/local/repo";
+import { createLocalTask, listWorkspaces, patchLocalTask } from "@/lib/local/repo";
 import { saveAndSync } from "@/lib/local/sync";
 import { apiFetch, apiUpload } from "@/lib/sync-api";
 import { RecurWeekdayPicker } from "@/components/RecurWeekdayPicker";
-import { ChecklistEditor } from "@/components/ChecklistEditor";
+import { NotesEditor, isEmptyNotesHtml } from "@/components/NotesEditor";
 
 type Member = {
   id: string;
@@ -31,8 +31,6 @@ type Workspace = {
   buckets: { id: string; name: string; color: string }[];
 };
 
-type ChecklistDraft = { text: string; done: boolean };
-type LinkDraft = { url: string; title?: string };
 type Mode = "simple" | "full";
 type Variant = "task" | "event";
 
@@ -57,11 +55,13 @@ export function NewTaskModal({
   onClose,
   initialMode = "full",
   variant = "task",
+  initialTitle = "",
 }: {
   open: boolean;
   onClose: () => void;
   initialMode?: Mode;
   variant?: Variant;
+  initialTitle?: string;
 }) {
   const router = useRouter();
   const theme = useThemePrefs();
@@ -82,9 +82,6 @@ export function NewTaskModal({
   const [assigneeId, setAssigneeId] = useState("");
   const [meId, setMeId] = useState("");
   const [mentionIds, setMentionIds] = useState<string[]>([]);
-  const [checklist, setChecklist] = useState<ChecklistDraft[]>([]);
-  const [links, setLinks] = useState<LinkDraft[]>([]);
-  const [linkUrl, setLinkUrl] = useState("");
   const [headerFile, setHeaderFile] = useState<File | null>(null);
   const [headerPreview, setHeaderPreview] = useState<string | null>(null);
   const [emoji, setEmoji] = useState<string | null>(null);
@@ -102,8 +99,11 @@ export function NewTaskModal({
   const [portalContainer, setPortalContainer] = useState<HTMLElement | null>(null);
 
   useEffect(() => {
-    if (open) setMode(isEvent ? "full" : initialMode);
-  }, [open, initialMode, isEvent]);
+    if (open) {
+      setMode(isEvent ? "full" : initialMode);
+      if (initialTitle) setTitle(initialTitle);
+    }
+  }, [open, initialMode, isEvent, initialTitle]);
 
   useEffect(() => {
     setPortalContainer(document.body);
@@ -237,9 +237,6 @@ export function NewTaskModal({
     setEventEnd("10:00");
     setAssigneeId(meId || members[0]?.id || "");
     setMentionIds([]);
-    setChecklist([]);
-    setLinks([]);
-    setLinkUrl("");
     setHeaderFile(null);
     setEmoji(null);
     setDocs([]);
@@ -287,7 +284,7 @@ export function NewTaskModal({
       const local = await createLocalTask({
         workspaceId,
         title,
-        notes: mode === "full" && notes.trim() ? notes : null,
+        notes: mode === "full" && notes.trim() && !isEmptyNotesHtml(notes) ? notes : null,
         emoji: mode === "full" ? emoji : null,
         priority,
         estimateMinutes,
@@ -298,7 +295,6 @@ export function NewTaskModal({
         allowSplit: isEvent ? false : undefined,
         scheduledStart: lockedStart,
         scheduledEnd: lockedEnd,
-        links: mode === "full" && links.length ? links : undefined,
         isRecurring: isEvent || mode === "full" ? isRecurring : false,
         recurFreq: (isEvent || mode === "full") && isRecurring ? recurFreq : null,
         recurInterval: (isEvent || mode === "full") && isRecurring ? recurInterval : 1,
@@ -312,7 +308,6 @@ export function NewTaskModal({
           (isEvent || mode === "full") && isRecurring && recurFreq === "WEEKLY" && recurByWeekdays.length
             ? recurByWeekdays
             : null,
-        checklist: mode === "full" ? checklist.filter((c) => c.text.trim()) : undefined,
         mentionIds: mode === "full" && mentionIds.length ? mentionIds : undefined,
       });
 
@@ -331,7 +326,19 @@ export function NewTaskModal({
           const idMap = await saveAndSync();
           const taskId = idMap[localId] ?? localId;
           if (doUploads && !taskId.startsWith("local_")) {
-            if (pendingHeader) await uploadHeader(taskId, pendingHeader);
+            if (pendingHeader) {
+              const ok = await uploadHeader(taskId, pendingHeader);
+              if (ok) {
+                const res = await apiFetch(`/api/tasks/${taskId}`);
+                if (res.ok) {
+                  const data = await res.json();
+                  await patchLocalTask(taskId, {
+                    headerImageKey: data.task?.headerImageKey ?? null,
+                    headerImageUrl: data.task?.headerImageUrl ?? null,
+                  });
+                }
+              }
+            }
             for (const doc of pendingDocs) await uploadFile(taskId, doc);
           }
         } catch (err) {
@@ -634,14 +641,7 @@ export function NewTaskModal({
                 </select>
               </label>
 
-              <textarea
-                className="field"
-                rows={6}
-                placeholder="Notes"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                style={{ minHeight: "7.5rem", resize: "vertical" }}
-              />
+              <NotesEditor value={notes} onChange={setNotes} />
 
               {templates.length > 0 && (
                 <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
@@ -731,42 +731,6 @@ export function NewTaskModal({
                 )}
               </div>
 
-              <ChecklistEditor
-                items={checklist}
-                onChange={setChecklist}
-                meta={
-                  <>
-                    <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
-                      Bucket
-                      <BucketSelect
-                        buckets={current?.buckets ?? []}
-                        value={bucketId}
-                        onChange={setBucketId}
-                      />
-                    </label>
-                    <div>
-                      <div style={{ fontSize: "0.85rem", marginBottom: "0.35rem" }}>Priority</div>
-                      <PriorityButtons value={priority} onChange={setPriority} />
-                    </div>
-                    {!isEvent && (
-                      <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
-                        Due date
-                        <DueDatePicker value={dueAt} onChange={setDueAt} />
-                      </label>
-                    )}
-                    <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
-                      Assignee
-                      <AssigneeSelect
-                        members={members}
-                        value={assigneeId}
-                        onChange={setAssigneeId}
-                        meId={meId || members[0]?.id}
-                      />
-                    </label>
-                  </>
-                }
-              />
-
               {members.length > 0 && (
                 <div style={{ display: "grid", gap: "0.5rem" }}>
                   <div style={{ fontSize: "0.85rem", fontWeight: 600 }}>Tag members</div>
@@ -799,61 +763,6 @@ export function NewTaskModal({
                   </div>
                 </div>
               )}
-
-              <div style={{ display: "grid", gap: "0.5rem" }}>
-                <div
-                  style={{
-                    fontSize: "0.85rem",
-                    fontWeight: 600,
-                    display: "flex",
-                    gap: "0.4rem",
-                    alignItems: "center",
-                  }}
-                >
-                  <Link2 size={16} /> Links
-                </div>
-                {links.map((l, index) => (
-                  <div key={index} style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-                    <span
-                      style={{
-                        flex: 1,
-                        fontSize: "0.85rem",
-                        color: "var(--brand)",
-                        wordBreak: "break-all",
-                      }}
-                    >
-                      {l.url}
-                    </span>
-                    <button
-                      type="button"
-                      className="btn ghost"
-                      onClick={() => setLinks(links.filter((_, i) => i !== index))}
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-                ))}
-                <div style={{ display: "flex", gap: "0.4rem" }}>
-                  <input
-                    className="field"
-                    placeholder="https://"
-                    value={linkUrl}
-                    onChange={(e) => setLinkUrl(e.target.value)}
-                  />
-                  <button
-                    type="button"
-                    className="btn secondary"
-                    onClick={() => {
-                      const url = linkUrl.trim();
-                      if (!url) return;
-                      setLinks([...links, { url }]);
-                      setLinkUrl("");
-                    }}
-                  >
-                    Add
-                  </button>
-                </div>
-              </div>
 
               <div style={{ display: "grid", gap: "0.5rem" }}>
                 <div

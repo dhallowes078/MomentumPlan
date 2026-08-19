@@ -14,6 +14,17 @@ export type ChangelogEntry = {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.4.0",
+    date: "2026-08-19",
+    changes: [
+      "Checklists live in the side nav, separate from tasks — Focus still works, and any item can become a task",
+      "Task notes are a rich editor with bullets, checklists, and links",
+      "Task list header photos fade in from the right",
+      "Vertical calendar: scroll wheel moves through days off-screen",
+      "APK filename now includes the app version",
+    ],
+  },
+  {
     version: "0.3.9",
     date: "2026-08-19",
     changes: [

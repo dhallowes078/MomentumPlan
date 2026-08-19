@@ -3,6 +3,8 @@ import { addDays, startOfDay } from "date-fns";
 import {
   localDb,
   type LocalBucket,
+  type LocalChecklist,
+  type LocalChecklistItem,
   type LocalPrefs,
   type LocalScheduleBlock,
   type LocalTask,
@@ -179,6 +181,59 @@ export async function patchLocalTask(id: string, patch: Partial<LocalTask>, sync
     await enqueue({ type: "patchTask", taskId: id, body: syncBody });
   }
   return next;
+}
+
+export async function listChecklists(workspaceId: string): Promise<LocalChecklist[]> {
+  return localDb.checklists.where("workspaceId").equals(workspaceId).toArray();
+}
+
+export async function upsertLocalChecklist(input: {
+  id?: string;
+  workspaceId: string;
+  title: string;
+  items: LocalChecklistItem[];
+  position?: number;
+}): Promise<LocalChecklist> {
+  const existing = input.id ? await localDb.checklists.get(input.id) : undefined;
+  const id = existing?.id ?? input.id ?? `local_list_${uuid()}`;
+  const row: LocalChecklist = {
+    id,
+    workspaceId: input.workspaceId,
+    title: input.title.trim() || "Checklist",
+    items: input.items,
+    position: input.position ?? existing?.position ?? 0,
+    updatedAt: new Date().toISOString(),
+    _localOnly: existing?._localOnly ?? id.startsWith("local_list_"),
+  };
+  await localDb.checklists.put(row);
+
+  const pending = (await localDb.outbox.toArray()).find(
+    (r) => r.op.type === "upsertChecklist" && r.op.id === id
+  );
+  const op: OutboxOp = {
+    type: "upsertChecklist",
+    id,
+    workspaceId: row.workspaceId,
+    title: row.title,
+    items: row.items,
+    position: row.position,
+  };
+  if (pending) {
+    await localDb.outbox.put({ ...pending, op });
+  } else {
+    await enqueue(op);
+  }
+  return row;
+}
+
+export async function deleteLocalChecklist(id: string) {
+  await localDb.checklists.delete(id);
+  const pendingUpsert = (await localDb.outbox.toArray()).find(
+    (r) => r.op.type === "upsertChecklist" && r.op.id === id
+  );
+  if (pendingUpsert) await localDb.outbox.delete(pendingUpsert.id);
+  if (id.startsWith("local_list_")) return;
+  await enqueue({ type: "deleteChecklist", id });
 }
 
 export async function createLocalTask(input: {

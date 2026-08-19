@@ -74,6 +74,7 @@ export default function CalendarPage() {
     return n.getHours() * 60 + n.getMinutes();
   });
   const todayRef = useRef<HTMLDivElement | null>(null);
+  const verticalCalRef = useRef<HTMLDivElement | null>(null);
 
   const workDays = prefs?.workDays?.length ? prefs.workDays : [1, 2, 3, 4, 5];
   const planningDays = prefs?.planningDays ?? 14;
@@ -202,6 +203,20 @@ export default function CalendarPage() {
     }, 120);
     return () => window.clearTimeout(id);
   }, [days]);
+
+  useEffect(() => {
+    const el = verticalCalRef.current;
+    if (!el || view !== "vertical") return;
+    const onWheel = (e: WheelEvent) => {
+      if (e.shiftKey) return;
+      if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+      if (el.scrollWidth <= el.clientWidth) return;
+      e.preventDefault();
+      el.scrollLeft += e.deltaY;
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [view, days.length]);
 
   async function localDbTasksOpen() {
     const { localDb } = await import("@/lib/local/db");
@@ -480,7 +495,7 @@ export default function CalendarPage() {
           })}
         </div>
       ) : (
-        <div className="cal-vertical">
+        <div className="cal-vertical cal-vertical-scroll" ref={verticalCalRef}>
           {days.map((day) => {
             const { meetings, blocks } = dayContent(day);
             const isToday = startOfDay(day).getTime() === today.getTime();

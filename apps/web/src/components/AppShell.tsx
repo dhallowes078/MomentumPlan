@@ -9,6 +9,7 @@ import {
   CheckSquare,
   Cloud,
   CloudOff,
+  ListChecks,
   Plus,
   Settings2,
   SunMedium,
@@ -21,6 +22,7 @@ import { LocalDataProvider, useSync } from "@/components/LocalDataProvider";
 const links = [
   { href: "/today", label: "Today", icon: SunMedium },
   { href: "/tasks", label: "Tasks", icon: CheckSquare },
+  { href: "/checklists", label: "Checklists", icon: ListChecks },
   { href: "/calendar", label: "Calendar", icon: CalendarDays },
   { href: "/settings", label: "Settings", icon: Settings2 },
 ];
@@ -193,7 +195,7 @@ function AppShellInner({
                 gap: "0.2rem",
                 padding: "0.45rem 0.25rem",
                 borderRadius: "10px",
-                fontSize: "0.72rem",
+                fontSize: "0.68rem",
                 fontWeight: 600,
                 color: active ? "var(--brand)" : "var(--ink-muted)",
               }}

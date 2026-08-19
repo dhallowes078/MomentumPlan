@@ -119,6 +119,23 @@ export type LocalPrefs = {
   quietHoursEnd: number | null;
 };
 
+export type LocalChecklistItem = {
+  id?: string;
+  text: string;
+  done: boolean;
+  position?: number;
+};
+
+export type LocalChecklist = {
+  id: string;
+  workspaceId: string;
+  title: string;
+  items: LocalChecklistItem[];
+  position: number;
+  updatedAt: string;
+  _localOnly?: boolean;
+};
+
 export type OutboxOp =
   | {
       type: "createTask";
@@ -137,6 +154,15 @@ export type OutboxOp =
       color: string;
     }
   | { type: "putChecklist"; taskId: string; items: { text: string; done: boolean }[] }
+  | {
+      type: "upsertChecklist";
+      id: string;
+      workspaceId: string;
+      title: string;
+      items: LocalChecklistItem[];
+      position: number;
+    }
+  | { type: "deleteChecklist"; id: string }
   | { type: "reorder"; orderedTaskIds: string[] }
   | { type: "patchPrefs"; body: Record<string, unknown> }
   | { type: "runScheduler" };
@@ -171,6 +197,7 @@ class MomentumDB extends Dexie {
   meta!: EntityTable<MetaRow, "key">;
   meetings!: EntityTable<LocalMeeting, "id">;
   backlog!: EntityTable<LocalTask, "id">;
+  checklists!: EntityTable<LocalChecklist, "id">;
 
   constructor() {
     super("momentum-local-v1");
@@ -183,6 +210,17 @@ class MomentumDB extends Dexie {
       meta: "key",
       meetings: "id, start",
       backlog: "id, workspaceId, priority",
+    });
+    this.version(2).stores({
+      tasks: "id, workspaceId, status, priority, dueAt, updatedAt",
+      scheduleBlocks: "id, taskId, start, end",
+      workspaces: "id",
+      prefs: "id",
+      outbox: "id, createdAt",
+      meta: "key",
+      meetings: "id, start",
+      backlog: "id, workspaceId, priority",
+      checklists: "id, workspaceId, updatedAt",
     });
   }
 }

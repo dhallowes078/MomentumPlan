@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { ListChecks, Maximize2, Minimize2, Plus, Trash2 } from "lucide-react";
+import { ListChecks, Maximize2, Minimize2, Plus, SquarePlus, Trash2 } from "lucide-react";
 
 export type ChecklistDraftItem = {
   id?: string;
@@ -16,12 +16,17 @@ export function ChecklistEditor({
   onChange,
   meta,
   heading = "Checklist",
+  onHeadingChange,
+  onMakeTask,
 }: {
   items: ChecklistDraftItem[];
   onChange: (next: ChecklistDraftItem[]) => void;
   /** Shown in focus mode so bucket / priority / due stay editable. */
   meta?: ReactNode;
   heading?: string;
+  onHeadingChange?: (title: string) => void;
+  /** Turn a checklist row into a task (opens add-task with the item name). */
+  onMakeTask?: (item: ChecklistDraftItem) => void;
 }) {
   const [focused, setFocused] = useState(false);
   const [portalEl, setPortalEl] = useState<HTMLElement | null>(null);
@@ -104,6 +109,18 @@ export function ChecklistEditor({
               onKeyDown={(e) => onItemKeyDown(e, index)}
               style={item.done ? { textDecoration: "line-through", opacity: 0.72 } : undefined}
             />
+            {onMakeTask ? (
+              <button
+                type="button"
+                className="btn ghost"
+                aria-label="Make this item a task"
+                title="Make task"
+                disabled={!item.text.trim()}
+                onClick={() => onMakeTask(item)}
+              >
+                <SquarePlus size={16} />
+              </button>
+            ) : null}
             <button
               type="button"
               className="btn ghost"
@@ -125,7 +142,17 @@ export function ChecklistEditor({
     <div className="checklist-head">
       <div className="checklist-head-title">
         <ListChecks size={18} color="var(--brand)" />
-        <h2>{heading}</h2>
+        {onHeadingChange ? (
+          <input
+            className="field"
+            value={heading}
+            onChange={(e) => onHeadingChange(e.target.value)}
+            aria-label="Checklist title"
+            style={{ fontWeight: 650, fontSize: "1rem" }}
+          />
+        ) : (
+          <h2>{heading}</h2>
+        )}
         <span className="badge">
           {items.length ? `${doneCount}/${items.length}` : "Empty"}
         </span>
