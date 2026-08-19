@@ -232,6 +232,10 @@ export default function SettingsPage() {
     );
 
     try {
+      const pendingOps = await import("@/lib/local/db")
+        .then((m) => m.localDb.outbox.toArray())
+        .catch(() => [] as { op: { type: string } }[]);
+      const pendingPrefs = pendingOps.some((i) => i.op.type === "patchPrefs");
       const [p, w, me, codeRes, integ] = await Promise.all([
         fetch("/api/prefs").then((r) => (r.ok ? r.json() : null)),
         fetch("/api/workspaces").then((r) => (r.ok ? r.json() : null)),
@@ -239,7 +243,7 @@ export default function SettingsPage() {
         fetch("/api/me/access-code").then((r) => (r.ok ? r.json() : null)),
         fetch("/api/integrations").then((r) => (r.ok ? r.json() : null)),
       ]);
-      if (p?.prefs) {
+      if (p?.prefs && !pendingPrefs) {
         setPrefs({
           ...p.prefs,
           dayHours: parseDayHours(p.prefs.dayHours),

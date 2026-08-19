@@ -10,7 +10,7 @@ type Listener = (s: { status: SyncStatus; pending: number; lastError?: string })
 
 let status: SyncStatus = "idle";
 let lastError: string | undefined;
-let flushing = false;
+let flushPromise: Promise<Record<string, string>> | null = null;
 const listeners = new Set<Listener>();
 
 function emit() {
@@ -322,11 +322,19 @@ export async function pullFromServer() {
   const pendingIds = new Set(pendingCreates.map((t) => t.id));
   const outboxItems = await localDb.outbox.toArray();
   const protectedTaskIds = new Set<string>();
+  const pendingPatchIds = new Set<string>();
+  let pendingPrefs = false;
   for (const item of outboxItems) {
     const op = item.op;
-    // Only protect never-synced creates. Pending patches must not keep deleted
-    // server tasks alive as calendar/task ghosts.
+    // Never-synced creates must not be deleted by a pull.
     if (op.type === "createTask") protectedTaskIds.add(op.localId);
+    // Unflushed edits must not be overwritten by a stale server snapshot.
+    if (op.type === "patchTask") pendingPatchIds.add(op.taskId);
+    if (op.type === "putChecklist") pendingPatchIds.add(op.taskId);
+    if (op.type === "reorder") {
+      for (const id of op.orderedTaskIds) pendingPatchIds.add(id);
+    }
+    if (op.type === "patchPrefs") pendingPrefs = true;
   }
 
   for (const ws of workspaces) {
@@ -349,7 +357,11 @@ export async function pullFromServer() {
           await localDb.tasks.delete(t.id);
         }
       }
-      await localDb.tasks.bulkPut(serverTasks);
+      await localDb.tasks.bulkPut(
+        serverTasks.filter(
+          (t) => !pendingIds.has(t.id) && !protectedTaskIds.has(t.id) && !pendingPatchIds.has(t.id)
+        )
+      );
       for (const id of removedIds) {
         const orphans = await localDb.scheduleBlocks.where("taskId").equals(id).toArray();
         for (const b of orphans) await localDb.scheduleBlocks.delete(b.id);
@@ -476,7 +488,7 @@ export async function pullFromServer() {
   }
 
   const prefsPayload = await safeJson<{ prefs: Record<string, unknown> }>("/api/prefs");
-  if (prefsPayload?.prefs) {
+  if (prefsPayload?.prefs && !pendingPrefs) {
     const p = prefsPayload.prefs;
     await repo.putPrefs(
       {
@@ -542,8 +554,38 @@ export async function pullFromServer() {
   }
 }
 
-export async function flushOutbox() {
-  if (flushing) return;
+async function remapOutboxTaskIds(fromId: string, toId: string) {
+  if (!fromId || fromId === toId) return;
+  const rows = await localDb.outbox.toArray();
+  for (const row of rows) {
+    const op = row.op;
+    if (
+      (op.type === "patchTask" || op.type === "putChecklist" || op.type === "deleteTask") &&
+      op.taskId === fromId
+    ) {
+      await localDb.outbox.put({ ...row, op: { ...op, taskId: toId } });
+    } else if (op.type === "reorder") {
+      await localDb.outbox.put({
+        ...row,
+        op: {
+          ...op,
+          orderedTaskIds: op.orderedTaskIds.map((id) => (id === fromId ? toId : id)),
+        },
+      });
+    }
+  }
+}
+
+export async function flushOutbox(): Promise<Record<string, string>> {
+  if (flushPromise) return flushPromise;
+  flushPromise = runFlushOutbox().finally(() => {
+    flushPromise = null;
+  });
+  return flushPromise;
+}
+
+async function runFlushOutbox(): Promise<Record<string, string>> {
+  const idMap: Record<string, string> = {};
 
   // Local packer can run without network / device token.
   // Never call /api/schedule/run here — it is CPU-heavy and causes Worker Error 1101
@@ -565,13 +607,12 @@ export async function flushOutbox() {
 
   if (typeof navigator !== "undefined" && !navigator.onLine) {
     setStatus("offline");
-    return;
+    return idMap;
   }
   if (getSyncApiBase() && !getDeviceToken()) {
     setStatus("idle");
-    return;
+    return idMap;
   }
-  flushing = true;
   setStatus("syncing");
   try {
     // If outbox still targets offline workspace ids, fetch memberships and remap
@@ -670,6 +711,8 @@ export async function flushOutbox() {
           const data = await res.json();
           const serverId = data.task?.id as string;
           if (serverId) {
+            idMap[op.localId] = serverId;
+            await remapOutboxTaskIds(op.localId, serverId);
             const local = await localDb.tasks.get(op.localId);
             if (local) {
               await localDb.tasks.delete(op.localId);
@@ -707,7 +750,8 @@ export async function flushOutbox() {
             }
           }
         } else if (op.type === "patchTask") {
-          if (String(op.taskId).startsWith("local")) {
+          const taskId = idMap[op.taskId] ?? op.taskId;
+          if (String(taskId).startsWith("local")) {
             // Never synced — patch is meaningless on the server; drop it.
             await localDb.outbox.delete(item.id);
             continue;
@@ -716,24 +760,25 @@ export async function flushOutbox() {
           if (typeof body.bucketId === "string" && body.bucketId.startsWith("local")) {
             body.bucketId = null;
           }
-          const res = await apiFetch(`/api/tasks/${op.taskId}`, {
+          const res = await apiFetch(`/api/tasks/${taskId}`, {
             method: "PATCH",
             body: JSON.stringify(body),
           });
           if (res.status === 404 || res.status === 403) {
             // Gone or not ours — drop ghost so one bad patch cannot block the whole queue.
-            await dropLocalTaskAndBlocks(op.taskId);
+            await dropLocalTaskAndBlocks(taskId);
           } else if (!res.ok) {
             const errBody = await res.json().catch(() => null);
             throw new Error(syncFailMessage("patch", res, errBody));
           }
         } else if (op.type === "deleteTask") {
+          const taskId = idMap[op.taskId] ?? op.taskId;
           // Never try to DELETE temporary local ids on the server.
-          if (String(op.taskId).startsWith("local")) {
+          if (String(taskId).startsWith("local")) {
             await localDb.outbox.delete(item.id);
             continue;
           }
-          const res = await apiFetch(`/api/tasks/${op.taskId}`, { method: "DELETE" });
+          const res = await apiFetch(`/api/tasks/${taskId}`, { method: "DELETE" });
           // 404/403 = already gone or not ours — treat as success.
           if (!res.ok && res.status !== 404 && res.status !== 403) {
             const errBody = await res.json().catch(() => null);
@@ -826,15 +871,28 @@ export async function flushOutbox() {
             }
           }
         } else if (op.type === "putChecklist") {
-          const res = await apiFetch(`/api/tasks/${op.taskId}/checklist`, {
+          const taskId = idMap[op.taskId] ?? op.taskId;
+          if (String(taskId).startsWith("local")) {
+            await localDb.outbox.delete(item.id);
+            continue;
+          }
+          const res = await apiFetch(`/api/tasks/${taskId}/checklist`, {
             method: "PUT",
             body: JSON.stringify({ items: op.items }),
           });
           if (!res.ok) throw new Error(`checklist ${res.status}`);
         } else if (op.type === "reorder") {
+          const updates = op.orderedTaskIds
+            .map((origId) => idMap[origId] ?? origId)
+            .filter((id) => !id.startsWith("local"))
+            .map((id, position) => ({ id, position }));
+          if (!updates.length) {
+            await localDb.outbox.delete(item.id);
+            continue;
+          }
           const res = await apiFetch("/api/tasks/reorder", {
             method: "POST",
-            body: JSON.stringify({ updates: op.orderedTaskIds.map((id, position) => ({ id, position })) }),
+            body: JSON.stringify({ updates }),
           });
           if (!res.ok) throw new Error(`reorder ${res.status}`);
         } else if (op.type === "patchPrefs") {
@@ -860,9 +918,9 @@ export async function flushOutbox() {
     }
     if (status !== "error") setStatus("idle");
   } finally {
-    flushing = false;
     emit();
   }
+  return idMap;
 }
 
 async function dropLocalTaskAndBlocks(taskId: string) {
@@ -890,11 +948,12 @@ export async function syncAfterDeviceLink() {
   }
 }
 export async function saveAndSync() {
+  let idMap: Record<string, string> = {};
   if (canSyncRemote()) {
     // Remap offline workspace ids before attempting creates (prevents 403).
     await pullFromServer();
   }
-  await flushOutbox();
+  idMap = { ...idMap, ...(await flushOutbox()) };
   try {
     const { runLocalScheduler } = await import("./scheduler");
     await runLocalScheduler();
@@ -903,10 +962,11 @@ export async function saveAndSync() {
   }
   if (canSyncRemote()) {
     await pullFromServer();
-    await flushOutbox();
+    idMap = { ...idMap, ...(await flushOutbox()) };
     // Remote packer is expensive on Workers — fire-and-forget, never block edits.
     void apiFetch("/api/schedule/run", { method: "POST" }).catch(() => undefined);
   }
+  return idMap;
 }
 
 export async function bootLocalSync() {

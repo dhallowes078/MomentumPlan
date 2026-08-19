@@ -26,7 +26,8 @@ export function invalidateClientCache(pattern?: string) {
 }
 
 async function fetchJson(url: string, init?: RequestInit) {
-  const res = await fetch(url, init);
+  const { apiFetch } = await import("@/lib/sync-api");
+  const res = url.startsWith("/api") ? await apiFetch(url, init) : await fetch(url, init);
   if (!res.ok) {
     const err = new Error(`Request failed: ${res.status}`);
     (err as Error & { status: number }).status = res.status;

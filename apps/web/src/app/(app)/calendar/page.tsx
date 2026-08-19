@@ -67,7 +67,7 @@ export default function CalendarPage() {
   const meetings = useLocalMeetings();
   const prefs = useLocalPrefs();
   const [scheduling, setScheduling] = useState(false);
-  const [view, setView] = useState<CalendarViewMode>("horizontal");
+  const [view, setView] = useState<CalendarViewMode>(() => readCalendarView());
   const [viewportH, setViewportH] = useState(800);
   const [nowMinutes, setNowMinutes] = useState(() => {
     const n = new Date();

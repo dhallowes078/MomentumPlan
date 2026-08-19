@@ -99,9 +99,17 @@ function AppShellInner({
   const [newVariant, setNewVariant] = useState<"task" | "event">("task");
 
   useEffect(() => {
-    if ("serviceWorker" in navigator) {
-      void navigator.serviceWorker.register("/sw.js").catch(() => undefined);
-    }
+    void import("@capacitor/core")
+      .then(({ Capacitor }) => {
+        if (!Capacitor.isNativePlatform() && "serviceWorker" in navigator) {
+          void navigator.serviceWorker.register("/sw.js").catch(() => undefined);
+        }
+      })
+      .catch(() => {
+        if ("serviceWorker" in navigator) {
+          void navigator.serviceWorker.register("/sw.js").catch(() => undefined);
+        }
+      });
     void import("@/lib/local/notifications")
       .then((m) => m.initNotifications())
       .catch(() => undefined);

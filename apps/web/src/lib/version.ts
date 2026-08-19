@@ -14,6 +14,16 @@ export type ChangelogEntry = {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.3.7",
+    date: "2026-08-19",
+    changes: [
+      "Unsaved edits and theme/schedule prefs are no longer overwritten by a cloud pull",
+      "New tasks open the right record after sync (no more matching by title)",
+      "Dark theme now drives the Android status bar",
+      "File uploads and prefs refresh use the phone’s signed sync API",
+    ],
+  },
+  {
     version: "0.3.6",
     date: "2026-07-30",
     changes: [

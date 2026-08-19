@@ -52,7 +52,13 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
         applyTheme(fromLocal.themeColor, fromLocal.darkMode);
       }
 
-      const res = await fetch("/api/prefs");
+      const pending = await import("@/lib/local/db")
+        .then((m) => m.localDb.outbox.toArray())
+        .catch(() => [] as { op: { type: string } }[]);
+      if (pending.some((i) => i.op.type === "patchPrefs")) return;
+
+      const { apiFetch } = await import("@/lib/sync-api");
+      const res = await apiFetch("/api/prefs");
       if (!res.ok) return;
       const { prefs } = await res.json();
       const next = {

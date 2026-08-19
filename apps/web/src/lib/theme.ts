@@ -206,4 +206,17 @@ export function applyTheme(themeColor: string, darkMode: boolean, persist = true
   root.style.setProperty("--field-bg", p.fieldBg);
   root.style.setProperty("--card-bg", p.cardBg);
   if (persist) writeStoredTheme(themeColor, darkMode);
+  void syncNativeChrome(darkMode, p.bg);
+}
+
+async function syncNativeChrome(darkMode: boolean, bg: string) {
+  try {
+    const { Capacitor } = await import("@capacitor/core");
+    if (!Capacitor.isNativePlatform()) return;
+    const { StatusBar, Style } = await import("@capacitor/status-bar");
+    await StatusBar.setStyle({ style: darkMode ? Style.Dark : Style.Light }).catch(() => undefined);
+    await StatusBar.setBackgroundColor({ color: bg }).catch(() => undefined);
+  } catch {
+    // web / plugin missing
+  }
 }

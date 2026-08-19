@@ -85,6 +85,19 @@ export async function apiFetch(path: string, init?: RequestInit): Promise<Respon
   return fetch(apiUrl(path), { ...init, headers });
 }
 
+/** Multipart upload — do not set Content-Type so the browser adds the boundary. */
+export async function apiUpload(
+  path: string,
+  formData: FormData,
+  method: "POST" | "PATCH" | "PUT" = "POST"
+): Promise<Response> {
+  return fetch(apiUrl(path), {
+    method,
+    body: formData,
+    headers: authHeaders(),
+  });
+}
+
 /**
  * Absolute media URL for img/CSS backgrounds.
  * On mobile, attachments need the sync host + device token (img tags can't send Authorization).

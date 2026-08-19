@@ -440,6 +440,7 @@ export default function TaskDetailPage() {
     );
     const { saveAndSync } = await import("@/lib/local/sync");
     await saveAndSync();
+    void import("@/lib/local/widget-sync").then((m) => m.syncHomeWidget());
     window.setTimeout(() => {
       router.push("/tasks");
     }, 850);

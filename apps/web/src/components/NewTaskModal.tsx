@@ -13,6 +13,7 @@ import { FileButton } from "@/components/FileButton";
 import { EmojiPicker } from "@/components/EmojiPicker";
 import { createLocalTask, listWorkspaces } from "@/lib/local/repo";
 import { saveAndSync } from "@/lib/local/sync";
+import { apiFetch, apiUpload } from "@/lib/sync-api";
 import { RecurWeekdayPicker } from "@/components/RecurWeekdayPicker";
 
 type Member = {
@@ -103,7 +104,7 @@ export function NewTaskModal({
 
   useEffect(() => {
     if (!open) return;
-    void fetch("/api/workspaces")
+    void apiFetch("/api/workspaces")
       .then(async (r) => {
         if (r.ok) return r.json();
         const local = await listWorkspaces();
@@ -130,7 +131,7 @@ export function NewTaskModal({
         );
         setWorkspaceId((prev) => prev || local[0]?.id || "");
       });
-    void fetch("/api/me")
+    void apiFetch("/api/me")
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (data?.user?.id) setMeId(data.user.id);
@@ -148,7 +149,7 @@ export function NewTaskModal({
       setTemplates([]);
       return;
     }
-    void fetch(`/api/workspaces/${workspaceId}`)
+    void apiFetch(`/api/workspaces/${workspaceId}`)
       .then(async (r) => {
         if (r.ok) return r.json();
         const local = await listWorkspaces();
@@ -186,7 +187,7 @@ export function NewTaskModal({
         setMembers(nextMembers);
         setAssigneeId((prev) => prev || nextMembers[0]?.id || "");
       });
-    void fetch(`/api/templates?workspaceId=${workspaceId}`)
+    void apiFetch(`/api/templates?workspaceId=${workspaceId}`)
       .then((r) => (r.ok ? r.json() : { templates: [] }))
       .then((data) => setTemplates(data.templates ?? []))
       .catch(() => setTemplates([]));
@@ -243,10 +244,7 @@ export function NewTaskModal({
   async function uploadFile(taskId: string, file: File): Promise<string | null> {
     const fd = new FormData();
     fd.set("file", file);
-    const res = await fetch(`/api/tasks/${taskId}/attachments`, {
-      method: "POST",
-      body: fd,
-    });
+    const res = await apiUpload(`/api/tasks/${taskId}/attachments`, fd);
     if (!res.ok) return null;
     const data = await res.json();
     return data.attachment?.storageKey ?? null;
@@ -255,10 +253,7 @@ export function NewTaskModal({
   async function uploadHeader(taskId: string, file: File): Promise<boolean> {
     const fd = new FormData();
     fd.set("file", file);
-    const res = await fetch(`/api/tasks/${taskId}/header`, {
-      method: "POST",
-      body: fd,
-    });
+    const res = await apiUpload(`/api/tasks/${taskId}/header`, fd);
     return res.ok;
   }
 
@@ -282,71 +277,58 @@ export function NewTaskModal({
     }
 
     setSaving(true);
+    try {
+      const local = await createLocalTask({
+        workspaceId,
+        title,
+        notes: mode === "full" && notes.trim() ? notes : null,
+        emoji: mode === "full" ? emoji : null,
+        priority,
+        estimateMinutes,
+        bucketId: bucketId || null,
+        assigneeId: assigneeId || meId || null,
+        dueAt: !isEvent && dueAt ? new Date(`${dueAt}T17:00:00`).toISOString() : null,
+        locked: isEvent,
+        allowSplit: isEvent ? false : undefined,
+        scheduledStart: lockedStart,
+        scheduledEnd: lockedEnd,
+        links: mode === "full" && links.length ? links : undefined,
+        isRecurring: isEvent || mode === "full" ? isRecurring : false,
+        recurFreq: (isEvent || mode === "full") && isRecurring ? recurFreq : null,
+        recurInterval: (isEvent || mode === "full") && isRecurring ? recurInterval : 1,
+        recurEndsAt:
+          (isEvent || mode === "full") && isRecurring && recurEndsAt
+            ? new Date(`${recurEndsAt}T23:59:59`).toISOString()
+            : null,
+        recurCount:
+          (isEvent || mode === "full") && isRecurring && recurCount ? Number(recurCount) : null,
+        recurByWeekdays:
+          (isEvent || mode === "full") && isRecurring && recurFreq === "WEEKLY" && recurByWeekdays.length
+            ? recurByWeekdays
+            : null,
+        checklist: mode === "full" ? checklist.filter((c) => c.text.trim()) : undefined,
+        mentionIds: mode === "full" && mentionIds.length ? mentionIds : undefined,
+      });
 
-    const local = await createLocalTask({
-      workspaceId,
-      title,
-      notes: mode === "full" && notes.trim() ? notes : null,
-      emoji: mode === "full" ? emoji : null,
-      priority,
-      estimateMinutes,
-      bucketId: bucketId || null,
-      assigneeId: assigneeId || meId || null,
-      dueAt: !isEvent && dueAt ? new Date(`${dueAt}T17:00:00`).toISOString() : null,
-      locked: isEvent,
-      allowSplit: isEvent ? false : undefined,
-      scheduledStart: lockedStart,
-      scheduledEnd: lockedEnd,
-      links: mode === "full" && links.length ? links : undefined,
-      isRecurring: isEvent || mode === "full" ? isRecurring : false,
-      recurFreq: (isEvent || mode === "full") && isRecurring ? recurFreq : null,
-      recurInterval: (isEvent || mode === "full") && isRecurring ? recurInterval : 1,
-      recurEndsAt:
-        (isEvent || mode === "full") && isRecurring && recurEndsAt
-          ? new Date(`${recurEndsAt}T23:59:59`).toISOString()
-          : null,
-      recurCount:
-        (isEvent || mode === "full") && isRecurring && recurCount ? Number(recurCount) : null,
-      recurByWeekdays:
-        (isEvent || mode === "full") && isRecurring && recurFreq === "WEEKLY" && recurByWeekdays.length
-          ? recurByWeekdays
-          : null,
-      checklist: mode === "full" ? checklist.filter((c) => c.text.trim()) : undefined,
-      mentionIds: mode === "full" && mentionIds.length ? mentionIds : undefined,
-    });
+      const idMap = await saveAndSync();
+      const taskId = idMap[local.id] ?? local.id;
 
-    await saveAndSync();
-
-    const { getTask } = await import("@/lib/local/repo");
-    const { localDb } = await import("@/lib/local/db");
-    let taskId = local.id;
-    const stillLocal = await getTask(local.id);
-    if (!stillLocal || stillLocal._localOnly) {
-      const all = await localDb.tasks.where("workspaceId").equals(workspaceId).toArray();
-      const match = all.find((t) => t.title === local.title && !t._localOnly);
-      if (match) taskId = match.id;
-    } else {
-      taskId = stillLocal.id;
-    }
-
-    if (mode === "full" && !taskId.startsWith("local_")) {
-      if (headerFile) {
-        await uploadHeader(taskId, headerFile);
+      if (mode === "full" && !taskId.startsWith("local_")) {
+        if (headerFile) {
+          await uploadHeader(taskId, headerFile);
+        }
+        for (const doc of docs) {
+          await uploadFile(taskId, doc);
+        }
       }
-      for (const doc of docs) {
-        await uploadFile(taskId, doc);
-      }
-    }
 
-    setSaving(false);
-    reset();
-    onClose();
-    if (!taskId.startsWith("local_")) {
+      reset();
+      onClose();
       router.push(`/tasks/${taskId}`);
-    } else {
-      router.push("/tasks");
+      router.refresh();
+    } finally {
+      setSaving(false);
     }
-    router.refresh();
   }
 
   const headerBackground = headerPreview
