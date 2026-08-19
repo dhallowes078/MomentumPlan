@@ -68,7 +68,7 @@ export function ChecklistEditor({
   }
 
   function addItem() {
-    onChange([...items, { text: "", done: false }]);
+    onChange([...items, { id: `row_${Date.now()}_${items.length}`, text: "", done: false }]);
     setFocusNew(true);
   }
 

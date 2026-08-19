@@ -187,25 +187,31 @@ export async function listChecklists(workspaceId: string): Promise<LocalChecklis
   return localDb.checklists.where("workspaceId").equals(workspaceId).toArray();
 }
 
-export async function upsertLocalChecklist(input: {
-  id?: string;
-  workspaceId: string;
-  title: string;
-  items: LocalChecklistItem[];
-  position?: number;
-}): Promise<LocalChecklist> {
+export async function upsertLocalChecklist(
+  input: {
+    id?: string;
+    workspaceId: string;
+    title: string;
+    items: LocalChecklistItem[];
+    position?: number;
+  },
+  opts?: { enqueue?: boolean }
+): Promise<LocalChecklist> {
   const existing = input.id ? await localDb.checklists.get(input.id) : undefined;
   const id = existing?.id ?? input.id ?? `local_list_${uuid()}`;
+  const enqueueOp = opts?.enqueue !== false;
   const row: LocalChecklist = {
     id,
     workspaceId: input.workspaceId,
-    title: input.title.trim() || "Checklist",
+    title: enqueueOp ? input.title.trim() || "Checklist" : input.title,
     items: input.items,
     position: input.position ?? existing?.position ?? 0,
     updatedAt: new Date().toISOString(),
     _localOnly: existing?._localOnly ?? id.startsWith("local_list_"),
   };
   await localDb.checklists.put(row);
+
+  if (!enqueueOp) return row;
 
   const pending = (await localDb.outbox.toArray()).find(
     (r) => r.op.type === "upsertChecklist" && r.op.id === id

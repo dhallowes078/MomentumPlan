@@ -14,6 +14,13 @@ export type ChangelogEntry = {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.4.1",
+    date: "2026-08-19",
+    changes: [
+      "Checklist title and items stay editable until you tap Save — no more mid-typing sync",
+    ],
+  },
+  {
     version: "0.4.0",
     date: "2026-08-19",
     changes: [
