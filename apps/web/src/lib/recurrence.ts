@@ -59,6 +59,71 @@ function recurrenceBase(task: RecurrenceInput): Date {
   return startOfDay(raw);
 }
 
+function stepCursor(task: RecurrenceInput, cursor: Date): Date | null {
+  if (!task.recurFreq) return null;
+  const next = nextOccurrenceDate(
+    cursor,
+    task.recurFreq,
+    task.recurInterval ?? 1,
+    task.recurByWeekdays
+  );
+  if (next.getTime() <= cursor.getTime()) return null;
+  return next;
+}
+
+/** All locked windows for an event (including repeats) that overlap [rangeStart, rangeEnd). */
+export function expandLockedOccurrences(
+  task: RecurrenceInput,
+  rangeStart: Date,
+  rangeEnd: Date
+): { start: Date; end: Date }[] {
+  if (!task.scheduledStart || !task.scheduledEnd) return [];
+  const duration = task.scheduledEnd.getTime() - task.scheduledStart.getTime();
+  if (duration <= 0) return [];
+
+  const inRange = (start: Date) => {
+    const end = new Date(start.getTime() + duration);
+    return end > rangeStart && start < rangeEnd ? { start, end } : null;
+  };
+
+  if (!task.isRecurring || !task.recurFreq) {
+    const hit = inRange(task.scheduledStart);
+    return hit ? [hit] : [];
+  }
+
+  const out: { start: Date; end: Date }[] = [];
+  const maxCount = Math.min(task.recurCount ?? 400, 400);
+  let cursor = new Date(task.scheduledStart);
+  let seriesIndex = 0;
+
+  while (seriesIndex < maxCount && cursor < rangeEnd) {
+    if (task.recurEndsAt && cursor > task.recurEndsAt) break;
+    const end = new Date(cursor.getTime() + duration);
+    if (end <= rangeStart) {
+      const next = stepCursor(task, cursor);
+      if (!next) break;
+      cursor = next;
+      seriesIndex += 1;
+      continue;
+    }
+    const hit = inRange(cursor);
+    if (hit) out.push(hit);
+    seriesIndex += 1;
+    const next = stepCursor(task, cursor);
+    if (!next) break;
+    cursor = next;
+  }
+  return out;
+}
+
+export function describeRecurrence(task: RecurrenceInput): string | null {
+  if (!task.isRecurring || !task.recurFreq) return null;
+  const n = Math.max(1, task.recurInterval ?? 1);
+  if (task.recurFreq === "DAILY") return n === 1 ? "Repeats daily" : `Repeats every ${n} days`;
+  if (task.recurFreq === "MONTHLY") return n === 1 ? "Repeats monthly" : `Repeats every ${n} months`;
+  return n === 1 ? "Repeats weekly" : `Repeats every ${n} weeks`;
+}
+
 export function shouldCreateNextOccurrence(task: RecurrenceInput) {
   if (!task.isRecurring || !task.recurFreq) return false;
   const done = (task.recurOccurrencesDone ?? 0) + 1;

@@ -12,8 +12,9 @@ import {
   listCalendarEvents,
   upsertTaskEvent,
 } from "@/lib/graph";
-import { addDays } from "date-fns";
+import { addDays, startOfDay } from "date-fns";
 import { parseDayHours } from "@/lib/day-hours";
+import { expandLockedOccurrences } from "@/lib/recurrence";
 
 const MS_PER_MIN = 60_000;
 
@@ -54,11 +55,14 @@ export async function runSchedulerForUser(userId: string) {
   });
   const workspaceIds = memberships.map((m) => m.workspaceId);
 
+  // Past work locks can become regular tasks. Recurring/calendar events stay put.
   await prisma.task.updateMany({
     where: {
       workspaceId: { in: workspaceIds },
       status: { in: ["TODO", "IN_PROGRESS"] },
       locked: true,
+      isRecurring: false,
+      dueAt: { not: null },
       scheduledEnd: { lt: now },
       OR: [{ assigneeId: userId }, { assigneeId: null, createdById: userId }],
     },
@@ -199,8 +203,42 @@ export async function runSchedulerForUser(userId: string) {
     })
     .filter((t) => t.estimateMinutes > 0 || t.locked || (stickyMinutesByTask.get(t.id) ?? 0) > 0);
 
+  const taskById = new Map(tasks.map((t) => [t.id, t]));
+  const rangeStart = startOfDay(now);
+  const rangeEnd = addDays(rangeStart, Math.max(prefs.planningDays, 14) + 1);
+  const expanded: SchedulableTask[] = [];
+  for (const t of schedulable) {
+    const src = taskById.get(t.id);
+    if (t.locked && t.lockedStart && t.lockedEnd && src?.isRecurring) {
+      const windows = expandLockedOccurrences(
+        {
+          isRecurring: true,
+          recurFreq: src.recurFreq,
+          recurInterval: src.recurInterval,
+          recurByWeekdays: Array.isArray(src.recurByWeekdays)
+            ? (src.recurByWeekdays as number[])
+            : null,
+          recurEndsAt: src.recurEndsAt,
+          recurCount: src.recurCount,
+          scheduledStart: t.lockedStart,
+          scheduledEnd: t.lockedEnd,
+          locked: true,
+        },
+        rangeStart,
+        rangeEnd
+      );
+      if (windows.length) {
+        for (const w of windows) {
+          expanded.push({ ...t, lockedStart: w.start, lockedEnd: w.end });
+        }
+        continue;
+      }
+    }
+    expanded.push(t);
+  }
+
   const result = packSchedule(
-    schedulable,
+    expanded,
     [...outlookBusy, ...completedBusy, ...stickyBusy],
     now,
     prefs
@@ -232,6 +270,12 @@ export async function runSchedulerForUser(userId: string) {
       placements.some((p) => p.atRisk);
 
     if (placements.length === 0 && completedBlocks.length === 0 && stickyBlocks.length === 0) {
+      if (task.locked) {
+        if (task.atRisk !== atRisk) {
+          await prisma.task.update({ where: { id: task.id }, data: { atRisk } });
+        }
+        continue;
+      }
       const changed =
         task.scheduledStart != null || task.scheduledEnd != null || task.atRisk !== atRisk;
       if (changed) {
@@ -264,7 +308,11 @@ export async function runSchedulerForUser(userId: string) {
     const windowEndSlot =
       ends.length > 0 ? new Date(Math.max(...ends.map((d) => d.getTime()))) : null;
 
-    if (windowStart && windowEndSlot) {
+    if (task.locked) {
+      if (task.atRisk !== atRisk) {
+        await prisma.task.update({ where: { id: task.id }, data: { atRisk } });
+      }
+    } else if (windowStart && windowEndSlot) {
       const startSame =
         task.scheduledStart && sameInstant(task.scheduledStart, windowStart);
       const endSame = task.scheduledEnd && sameInstant(task.scheduledEnd, windowEndSlot);

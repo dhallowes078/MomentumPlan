@@ -46,6 +46,12 @@ function todayInputValue() {
   return `${y}-${m}-${day}`;
 }
 
+function atLocal(dateStr: string, timeStr: string) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const [hh, mm] = (timeStr || "00:00").split(":").map(Number);
+  return new Date(y, (m || 1) - 1, d || 1, hh || 0, mm || 0, 0, 0);
+}
+
 export function NewTaskModal({
   open,
   onClose,
@@ -267,14 +273,13 @@ export function NewTaskModal({
     let estimateMinutes = Math.max(5, estimate);
     if (isEvent) {
       if (!eventDate || !eventStart || !eventEnd) return;
-      lockedStart = new Date(`${eventDate}T${eventStart}:00`).toISOString();
-      lockedEnd = new Date(`${eventDate}T${eventEnd}:00`).toISOString();
-      if (Number.isNaN(Date.parse(lockedStart)) || Number.isNaN(Date.parse(lockedEnd))) return;
-      if (Date.parse(lockedEnd) <= Date.parse(lockedStart)) return;
-      estimateMinutes = Math.max(
-        5,
-        Math.round((Date.parse(lockedEnd) - Date.parse(lockedStart)) / 60000)
-      );
+      const start = atLocal(eventDate, eventStart);
+      const end = atLocal(eventDate, eventEnd);
+      if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return;
+      if (end.getTime() <= start.getTime()) return;
+      lockedStart = start.toISOString();
+      lockedEnd = end.toISOString();
+      estimateMinutes = Math.max(5, Math.round((end.getTime() - start.getTime()) / 60000));
     }
 
     setSaving(true);
@@ -288,7 +293,7 @@ export function NewTaskModal({
         estimateMinutes,
         bucketId: bucketId || null,
         assigneeId: assigneeId || meId || null,
-        dueAt: !isEvent && dueAt ? new Date(`${dueAt}T17:00:00`).toISOString() : null,
+        dueAt: !isEvent && dueAt ? atLocal(dueAt, "17:00").toISOString() : null,
         locked: isEvent,
         allowSplit: isEvent ? false : undefined,
         scheduledStart: lockedStart,
@@ -299,7 +304,7 @@ export function NewTaskModal({
         recurInterval: (isEvent || mode === "full") && isRecurring ? recurInterval : 1,
         recurEndsAt:
           (isEvent || mode === "full") && isRecurring && recurEndsAt
-            ? new Date(`${recurEndsAt}T23:59:59`).toISOString()
+            ? atLocal(recurEndsAt, "23:59").toISOString()
             : null,
         recurCount:
           (isEvent || mode === "full") && isRecurring && recurCount ? Number(recurCount) : null,
@@ -311,22 +316,28 @@ export function NewTaskModal({
         mentionIds: mode === "full" && mentionIds.length ? mentionIds : undefined,
       });
 
-      const idMap = await saveAndSync();
-      const taskId = idMap[local.id] ?? local.id;
-
-      if (mode === "full" && !taskId.startsWith("local_")) {
-        if (headerFile) {
-          await uploadHeader(taskId, headerFile);
-        }
-        for (const doc of docs) {
-          await uploadFile(taskId, doc);
-        }
-      }
+      const pendingHeader = headerFile;
+      const pendingDocs = [...docs];
+      const localId = local.id;
+      const doUploads = mode === "full";
+      const dest = isEvent ? "/calendar" : "/tasks";
 
       reset();
       onClose();
-      router.push(`/tasks/${taskId}`);
-      router.refresh();
+      router.push(dest);
+
+      void (async () => {
+        try {
+          const idMap = await saveAndSync();
+          const taskId = idMap[localId] ?? localId;
+          if (doUploads && !taskId.startsWith("local_")) {
+            if (pendingHeader) await uploadHeader(taskId, pendingHeader);
+            for (const doc of pendingDocs) await uploadFile(taskId, doc);
+          }
+        } catch (err) {
+          console.error("post-create sync failed", err);
+        }
+      })();
     } finally {
       setSaving(false);
     }

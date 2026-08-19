@@ -121,10 +121,22 @@ export default function CalendarPage() {
   const days = useMemo(() => {
     const horizon = Math.max(planningDays, 14);
     const candidates = Array.from({ length: horizon + 7 }, (_, i) => addDays(today, i));
+    const dayHasItem = (day: Date) => {
+      const from = day.getTime();
+      const to = addDays(day, 1).getTime();
+      const overlaps = (startIso: string) => {
+        const s = new Date(startIso).getTime();
+        return s >= from && s < to;
+      };
+      return (
+        data.blocks.some((b) => overlaps(b.start)) ||
+        data.meetings.some((m) => overlaps(m.start))
+      );
+    };
     return candidates
-      .filter((day) => workDays.includes(day.getDay()))
-      .slice(0, Math.max(workDays.length, planningDays));
-  }, [today, workDays, planningDays]);
+      .filter((day) => workDays.includes(day.getDay()) || dayHasItem(day))
+      .slice(0, Math.max(workDays.length, planningDays) + 4);
+  }, [today, workDays, planningDays, data]);
 
   useEffect(() => {
     setView(readCalendarView());

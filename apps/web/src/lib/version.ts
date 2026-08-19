@@ -14,6 +14,15 @@ export type ChangelogEntry = {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.3.9",
+    date: "2026-08-19",
+    changes: [
+      "Create no longer waits on cloud sync — tasks go to the list, events to the calendar",
+      "Recurring events now appear on every matching day in the planning window",
+      "Event time is labeled as the event, not a due date; past events stay on their original time",
+    ],
+  },
+  {
     version: "0.3.8",
     date: "2026-08-19",
     changes: [

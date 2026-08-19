@@ -1,4 +1,5 @@
 import { v4 as uuid } from "uuid";
+import { addDays, startOfDay } from "date-fns";
 import {
   packSchedule,
   type BusyBlock,
@@ -8,6 +9,7 @@ import {
 import { localDb, type LocalScheduleBlock } from "./db";
 import * as repo from "./repo";
 import { parseDayHours } from "@/lib/day-hours";
+import { expandLockedOccurrences } from "@/lib/recurrence";
 
 /** Pack open tasks into Dexie schedule blocks on-device (no server required). */
 export async function runLocalScheduler() {
@@ -81,13 +83,44 @@ export async function runLocalScheduler() {
     };
   });
 
+  const taskById = new Map(tasks.map((t) => [t.id, t]));
+  const expanded: SchedulableTask[] = [];
+  const rangeStart = startOfDay(new Date());
+  const rangeEnd = addDays(rangeStart, Math.max(prefs.planningDays, 14) + 1);
+  for (const t of schedulable) {
+    const src = taskById.get(t.id);
+    if (t.locked && t.lockedStart && t.lockedEnd && src?.isRecurring) {
+      const windows = expandLockedOccurrences(
+        {
+          isRecurring: true,
+          recurFreq: src.recurFreq,
+          recurInterval: src.recurInterval,
+          recurByWeekdays: src.recurByWeekdays,
+          recurEndsAt: src.recurEndsAt ? new Date(src.recurEndsAt) : null,
+          recurCount: src.recurCount,
+          scheduledStart: t.lockedStart,
+          scheduledEnd: t.lockedEnd,
+          locked: true,
+        },
+        rangeStart,
+        rangeEnd
+      );
+      if (windows.length) {
+        for (const w of windows) {
+          expanded.push({ ...t, lockedStart: w.start, lockedEnd: w.end });
+        }
+        continue;
+      }
+    }
+    expanded.push(t);
+  }
+
   const meetings = await localDb.meetings.toArray();
   const busy: BusyBlock[] = meetings
     .filter((m) => !m.isMomentum)
     .map((m) => ({ start: new Date(m.start), end: new Date(m.end) }));
 
-  const result = packSchedule(schedulable, busy, new Date(), prefs);
-  const taskById = new Map(tasks.map((t) => [t.id, t]));
+  const result = packSchedule(expanded, busy, new Date(), prefs);
 
   const blocks: LocalScheduleBlock[] = result.placements.map((p) => {
     const task = taskById.get(p.taskId);
@@ -130,6 +163,13 @@ export async function runLocalScheduler() {
     for (const t of tasks) {
       const first = firstByTask.get(t.id);
       const last = lastByTask.get(t.id);
+      if (t.locked) {
+        await localDb.tasks.update(t.id, {
+          atRisk: first ? first.atRisk : unplacedRisk.has(t.id),
+          updatedAt: new Date().toISOString(),
+        });
+        continue;
+      }
       await localDb.tasks.update(t.id, {
         scheduledStart: first ? first.start.toISOString() : null,
         scheduledEnd: last ? last.end.toISOString() : null,

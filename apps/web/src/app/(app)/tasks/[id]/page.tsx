@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { formatDay, formatMinutes, formatTime, priorityColor } from "@/lib/format";
 import { describeEventPayload, eventLabel } from "@/lib/history";
+import { describeRecurrence } from "@/lib/recurrence";
 import { useThemePrefs } from "@/components/ThemeProvider";
 import { PriorityButtons } from "@/components/PriorityButtons";
 import { BucketSelect } from "@/components/BucketSelect";
@@ -562,6 +563,11 @@ export default function TaskDetailPage() {
       : "linear-gradient(135deg, color-mix(in srgb, var(--brand) 35%, transparent), color-mix(in srgb, var(--accent) 22%, transparent))";
 
   const chunks = task.scheduleBlocks ?? [];
+  const recurLabel = describeRecurrence({
+    isRecurring: Boolean(draft.isRecurring),
+    recurFreq: draft.recurFreq,
+    recurInterval: draft.recurInterval,
+  });
 
   return (
     <div className={`page-wrap rise ${completing ? "completing" : ""}`}>
@@ -673,17 +679,19 @@ export default function TaskDetailPage() {
             />
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.55rem" }}>
-            <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
-              Due date
-              <DueDatePicker
-                value={draft.dueAt ? draft.dueAt.slice(0, 10) : ""}
-                onChange={(due) => {
-                  const dueAt = due ? new Date(`${due}T17:00:00`).toISOString() : null;
-                  updateDraft({ dueAt });
-                }}
-              />
-            </label>
+          <div style={{ display: "grid", gridTemplateColumns: draft.locked ? "1fr" : "1fr 1fr", gap: "0.55rem" }}>
+            {!draft.locked && (
+              <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
+                Due date
+                <DueDatePicker
+                  value={draft.dueAt ? draft.dueAt.slice(0, 10) : ""}
+                  onChange={(due) => {
+                    const dueAt = due ? new Date(`${due}T17:00:00`).toISOString() : null;
+                    updateDraft({ dueAt });
+                  }}
+                />
+              </label>
+            )}
             <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
               Assignee
               <AssigneeSelect
@@ -704,13 +712,15 @@ export default function TaskDetailPage() {
 
           <div style={{ display: "flex", flexWrap: "wrap", gap: "0.45rem" }}>
             {task.atRisk && <span className="badge risk">due pressure</span>}
-            {draft.locked && <span className="badge warn">locked schedule</span>}
+            {draft.locked && <span className="badge warn">{draft.dueAt ? "locked schedule" : "event"}</span>}
             {task.scheduledStart && task.scheduledEnd && (
               <span className="badge">
+                {draft.locked ? "Event · " : ""}
                 {formatDay(task.scheduledStart)} {formatTime(task.scheduledStart)}–
                 {formatTime(task.scheduledEnd)}
               </span>
             )}
+            {recurLabel && <span className="badge">{recurLabel}</span>}
             <span className="badge" style={{ color: priorityColor(draft.priority) }}>
               {draft.priority} · {formatMinutes(draft.estimateMinutes)}
             </span>
@@ -898,16 +908,18 @@ export default function TaskDetailPage() {
                 onChange={(priority) => updateDraft({ priority })}
               />
             </div>
-            <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
-              Due date
-              <DueDatePicker
-                value={draft.dueAt ? draft.dueAt.slice(0, 10) : ""}
-                onChange={(due) => {
-                  const dueAt = due ? new Date(`${due}T17:00:00`).toISOString() : null;
-                  updateDraft({ dueAt });
-                }}
-              />
-            </label>
+            {!draft.locked && (
+              <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
+                Due date
+                <DueDatePicker
+                  value={draft.dueAt ? draft.dueAt.slice(0, 10) : ""}
+                  onChange={(due) => {
+                    const dueAt = due ? new Date(`${due}T17:00:00`).toISOString() : null;
+                    updateDraft({ dueAt });
+                  }}
+                />
+              </label>
+            )}
             <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
               Assignee
               <AssigneeSelect

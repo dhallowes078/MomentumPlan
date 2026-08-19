@@ -1,4 +1,5 @@
 import { v4 as uuid } from "uuid";
+import { addDays, startOfDay } from "date-fns";
 import {
   localDb,
   type LocalBucket,
@@ -8,6 +9,7 @@ import {
   type LocalWorkspace,
   type OutboxOp,
 } from "./db";
+import { expandLockedOccurrences } from "@/lib/recurrence";
 
 const DEFAULT_PREFS: LocalPrefs = {
   id: "prefs",
@@ -268,6 +270,47 @@ export async function createLocalTask(input: {
     checklist: input.checklist,
     mentionIds: input.mentionIds,
   });
+  if (task.locked && task.scheduledStart && task.scheduledEnd) {
+    const prefs = await getPrefs();
+    const from = startOfDay(new Date());
+    const to = addDays(from, Math.max(prefs.planningDays ?? 14, 14) + 1);
+    const windows = expandLockedOccurrences(
+      {
+        isRecurring: task.isRecurring,
+        recurFreq: task.recurFreq,
+        recurInterval: task.recurInterval,
+        recurByWeekdays: task.recurByWeekdays,
+        recurEndsAt: task.recurEndsAt ? new Date(task.recurEndsAt) : null,
+        recurCount: task.recurCount,
+        scheduledStart: new Date(task.scheduledStart),
+        scheduledEnd: new Date(task.scheduledEnd),
+        locked: true,
+      },
+      from,
+      to
+    );
+    if (windows.length) {
+      await localDb.scheduleBlocks.bulkPut(
+        windows.map((w) => ({
+          id: `local_block_${uuid()}`,
+          taskId: task.id,
+          start: w.start.toISOString(),
+          end: w.end.toISOString(),
+          completed: false,
+          task: {
+            id: task.id,
+            title: task.title,
+            priority: task.priority,
+            atRisk: false,
+            estimateMinutes: task.estimateMinutes,
+            status: task.status,
+            emoji: task.emoji,
+            bucket,
+          },
+        }))
+      );
+    }
+  }
   return task;
 }
 

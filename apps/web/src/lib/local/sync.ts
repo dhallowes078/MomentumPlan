@@ -947,6 +947,24 @@ export async function syncAfterDeviceLink() {
     await flushOutbox();
   }
 }
+/** Flush + pack without blocking the UI (create, background retries). */
+export function queueBackgroundSync() {
+  void (async () => {
+    try {
+      await flushOutbox();
+      const { runLocalScheduler } = await import("./scheduler");
+      await runLocalScheduler();
+      if (canSyncRemote()) {
+        await pullFromServer();
+        await flushOutbox();
+        void apiFetch("/api/schedule/run", { method: "POST" }).catch(() => undefined);
+      }
+    } catch (e) {
+      console.error("background sync failed", e);
+    }
+  })();
+}
+
 export async function saveAndSync() {
   let idMap: Record<string, string> = {};
   if (canSyncRemote()) {
@@ -954,17 +972,18 @@ export async function saveAndSync() {
     await pullFromServer();
   }
   idMap = { ...idMap, ...(await flushOutbox()) };
-  try {
-    const { runLocalScheduler } = await import("./scheduler");
-    await runLocalScheduler();
-  } catch {
-    // packing optional
-  }
   if (canSyncRemote()) {
     await pullFromServer();
     idMap = { ...idMap, ...(await flushOutbox()) };
     // Remote packer is expensive on Workers — fire-and-forget, never block edits.
     void apiFetch("/api/schedule/run", { method: "POST" }).catch(() => undefined);
+  }
+  try {
+    // Pack last so a cloud pull cannot wipe locally expanded recurring events.
+    const { runLocalScheduler } = await import("./scheduler");
+    await runLocalScheduler();
+  } catch {
+    // packing optional
   }
   return idMap;
 }

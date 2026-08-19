@@ -1,0 +1,16 @@
+---
+description: After user-facing app changes, bump version, deploy Cloudflare, and rebuild the APK.
+alwaysApply: true
+---
+
+# Ship web + APK with every change
+
+When you finish a user-facing change (UI, sync, auth, notifications, scheduling):
+
+1. Prepend a changelog entry and bump `APP_VERSION` in `apps/web/src/lib/version.ts` (ISO date, 1–3 bullets).
+2. Deploy the live Worker: `DATABASE_URL=file:./dev.db npm run deploy -w @momentum/web` (do not use a global Postgres `DATABASE_URL`). Live URL: https://momentum.momentum-app.workers.dev
+3. Rebuild the debug APK: `npm run mobile:apk` from the repo root. Copy lands at `Momentum-debug.apk`.
+
+If Wrangler is not logged in, run `npx wrangler login` in `apps/web` and wait for success before deploy.
+
+Skip deploy/APK only for purely local docs, comments, or rules with no product change.
