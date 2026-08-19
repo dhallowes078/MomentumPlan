@@ -24,6 +24,7 @@ import { AssigneeSelect } from "@/components/AssigneeSelect";
 import { FileButton } from "@/components/FileButton";
 import { EmojiPicker } from "@/components/EmojiPicker";
 import { RecurWeekdayPicker } from "@/components/RecurWeekdayPicker";
+import { ChecklistEditor } from "@/components/ChecklistEditor";
 import { cachedJson, invalidateClientCache } from "@/lib/client-fetch";
 import * as localRepo from "@/lib/local/repo";
 import { resolveMediaUrl } from "@/lib/sync-api";
@@ -872,49 +873,52 @@ export default function TaskDetailPage() {
         </section>
       )}
 
-      <section className="card" style={{ padding: "1rem", display: "grid", gap: "0.75rem" }}>
-        <h2 style={{ margin: 0, fontSize: "1rem" }}>Checklist</h2>
-        {checklist.map((item, index) => (
-          <div key={item.id ?? index} style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-            <input
-              type="checkbox"
-              checked={item.done}
-              onChange={(e) => {
-                setChecklist(
-                  checklist.map((c, i) =>
-                    i === index ? { ...c, done: e.target.checked } : c
-                  )
-                );
-              }}
-            />
-            <input
-              className="field"
-              value={item.text}
-              onChange={(e) => {
-                setChecklist(
-                  checklist.map((c, i) =>
-                    i === index ? { ...c, text: e.target.value } : c
-                  )
-                );
-              }}
-            />
-            <button
-              type="button"
-              className="btn ghost"
-              onClick={() => setChecklist(checklist.filter((_, i) => i !== index))}
-            >
-              <Trash2 size={16} />
-            </button>
-          </div>
-        ))}
-        <button
-          className="btn secondary"
-          type="button"
-          onClick={() => setChecklist([...checklist, { text: "New item", done: false }])}
-        >
-          <Plus size={16} /> Add checklist item
-        </button>
-      </section>
+      <ChecklistEditor
+        items={checklist}
+        onChange={setChecklist}
+        meta={
+          <>
+            <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
+              Bucket
+              <BucketSelect
+                buckets={buckets}
+                value={draft.bucketId ?? ""}
+                onChange={(id) => {
+                  updateDraft({
+                    bucketId: id || null,
+                    bucket: buckets.find((b) => b.id === id) ?? null,
+                  });
+                }}
+              />
+            </label>
+            <div>
+              <div style={{ fontSize: "0.85rem", marginBottom: "0.35rem" }}>Priority</div>
+              <PriorityButtons
+                value={draft.priority}
+                onChange={(priority) => updateDraft({ priority })}
+              />
+            </div>
+            <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
+              Due date
+              <DueDatePicker
+                value={draft.dueAt ? draft.dueAt.slice(0, 10) : ""}
+                onChange={(due) => {
+                  const dueAt = due ? new Date(`${due}T17:00:00`).toISOString() : null;
+                  updateDraft({ dueAt });
+                }}
+              />
+            </label>
+            <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
+              Assignee
+              <AssigneeSelect
+                members={members}
+                value={draft.assigneeId ?? ""}
+                onChange={(id) => updateDraft({ assigneeId: id || null })}
+              />
+            </label>
+          </>
+        }
+      />
 
       <section className="card" style={{ padding: "1rem", display: "grid", gap: "0.75rem" }}>
         <h2 style={{ margin: 0, fontSize: "1rem" }}>Tag members</h2>

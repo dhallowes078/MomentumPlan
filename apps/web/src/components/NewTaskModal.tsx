@@ -15,6 +15,7 @@ import { createLocalTask, listWorkspaces } from "@/lib/local/repo";
 import { saveAndSync } from "@/lib/local/sync";
 import { apiFetch, apiUpload } from "@/lib/sync-api";
 import { RecurWeekdayPicker } from "@/components/RecurWeekdayPicker";
+import { ChecklistEditor } from "@/components/ChecklistEditor";
 
 type Member = {
   id: string;
@@ -719,49 +720,41 @@ export function NewTaskModal({
                 )}
               </div>
 
-              <div style={{ display: "grid", gap: "0.5rem" }}>
-                <div style={{ fontSize: "0.85rem", fontWeight: 600 }}>Checklist</div>
-                {checklist.map((item, index) => (
-                  <div key={index} style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-                    <input
-                      type="checkbox"
-                      checked={item.done}
-                      onChange={(e) =>
-                        setChecklist(
-                          checklist.map((c, i) =>
-                            i === index ? { ...c, done: e.target.checked } : c
-                          )
-                        )
-                      }
-                    />
-                    <input
-                      className="field"
-                      value={item.text}
-                      onChange={(e) =>
-                        setChecklist(
-                          checklist.map((c, i) =>
-                            i === index ? { ...c, text: e.target.value } : c
-                          )
-                        )
-                      }
-                    />
-                    <button
-                      type="button"
-                      className="btn ghost"
-                      onClick={() => setChecklist(checklist.filter((_, i) => i !== index))}
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-                ))}
-                <button
-                  type="button"
-                  className="btn secondary"
-                  onClick={() => setChecklist([...checklist, { text: "New item", done: false }])}
-                >
-                  <Plus size={16} /> Add checklist item
-                </button>
-              </div>
+              <ChecklistEditor
+                items={checklist}
+                onChange={setChecklist}
+                meta={
+                  <>
+                    <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
+                      Bucket
+                      <BucketSelect
+                        buckets={current?.buckets ?? []}
+                        value={bucketId}
+                        onChange={setBucketId}
+                      />
+                    </label>
+                    <div>
+                      <div style={{ fontSize: "0.85rem", marginBottom: "0.35rem" }}>Priority</div>
+                      <PriorityButtons value={priority} onChange={setPriority} />
+                    </div>
+                    {!isEvent && (
+                      <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
+                        Due date
+                        <DueDatePicker value={dueAt} onChange={setDueAt} />
+                      </label>
+                    )}
+                    <label style={{ display: "grid", gap: "0.25rem", fontSize: "0.85rem" }}>
+                      Assignee
+                      <AssigneeSelect
+                        members={members}
+                        value={assigneeId}
+                        onChange={setAssigneeId}
+                        meId={meId || members[0]?.id}
+                      />
+                    </label>
+                  </>
+                }
+              />
 
               {members.length > 0 && (
                 <div style={{ display: "grid", gap: "0.5rem" }}>

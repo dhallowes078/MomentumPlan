@@ -14,6 +14,15 @@ export type ChangelogEntry = {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.3.8",
+    date: "2026-08-19",
+    changes: [
+      "Checklists are their own section, with a Focus button for a full-screen editor",
+      "Focus mode still lets you change bucket, priority, due date, and assignee",
+      "Checklist grows as you add items; Enter on the last row adds another",
+    ],
+  },
+  {
     version: "0.3.7",
     date: "2026-08-19",
     changes: [
