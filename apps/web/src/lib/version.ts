@@ -14,6 +14,13 @@ export type ChangelogEntry = {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.4.3",
+    date: "2026-08-20",
+    changes: [
+      "Focus mode fills the whole screen with the largest possible checklist rows",
+    ],
+  },
+  {
     version: "0.4.2",
     date: "2026-08-20",
     changes: [

@@ -155,7 +155,7 @@ export function ChecklistEditor({
             value={heading}
             onChange={(e) => onHeadingChange(e.target.value)}
             aria-label="Checklist title"
-            style={{ fontWeight: 650, fontSize: "1rem" }}
+            style={{ fontWeight: 650 }}
           />
         ) : (
           <h2>{heading}</h2>
