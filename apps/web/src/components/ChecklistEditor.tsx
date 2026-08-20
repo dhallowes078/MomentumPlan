@@ -112,13 +112,20 @@ export function ChecklistEditor({
             {onMakeTask ? (
               <button
                 type="button"
-                className="btn ghost"
+                className="btn ghost checklist-make-task"
                 aria-label="Make this item a task"
                 title="Make task"
                 disabled={!item.text.trim()}
-                onClick={() => onMakeTask(item)}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (!item.text.trim()) return;
+                  setFocused(false);
+                  onMakeTask(item);
+                }}
               >
-                <SquarePlus size={16} />
+                <SquarePlus size={18} />
+                <span className="checklist-make-task-label">Task</span>
               </button>
             ) : null}
             <button

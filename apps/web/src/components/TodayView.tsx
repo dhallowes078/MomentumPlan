@@ -1,16 +1,19 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Check, RefreshCw, TriangleAlert } from "lucide-react";
 import { format } from "date-fns";
 import { formatMinutes, formatTime, priorityColor } from "@/lib/format";
-import { useLocalToday } from "@/lib/local/hooks";
+import { useLocalToday, useLocalAllTasks } from "@/lib/local/hooks";
 import * as repo from "@/lib/local/repo";
 import { saveAndSync } from "@/lib/local/sync";
+import { TaskFadeCard } from "@/components/TaskFadeCard";
 
 export function TodayView() {
   const { blocks: liveBlocks, backlog, atRisk } = useLocalToday();
+  const allTasks = useLocalAllTasks();
+  const taskById = useMemo(() => new Map(allTasks.map((t) => [t.id, t])), [allTasks]);
   const [scheduling, setScheduling] = useState(false);
   const [completingId, setCompletingId] = useState<string | null>(null);
 
@@ -123,28 +126,32 @@ export function TodayView() {
         ) : (
           <div style={{ display: "grid", gap: "0.65rem" }}>
             {liveBlocks.map((b, i) => (
-              <div
+              <TaskFadeCard
                 key={b.id}
+                headerImageUrl={b.task?.headerImageUrl ?? taskById.get(b.task?.id ?? "")?.headerImageUrl}
+                fadeColor={b.task?.bucket?.color ?? priorityColor(b.task?.priority ?? 3)}
                 className={completingId === b.task?.id ? "completing" : "rise"}
                 style={{
-                  display: "grid",
-                  gridTemplateColumns: "72px 1fr auto",
-                  gap: "0.75rem",
-                  alignItems: "center",
                   padding: "0.75rem",
-                  borderRadius: "12px",
-                  background: "color-mix(in srgb, var(--bg-elevated) 70%, transparent)",
                   borderLeft: b.task?.bucket
                     ? `4px solid ${b.task.bucket.color}`
                     : "4px solid transparent",
                   animationDelay: `${i * 40}ms`,
                 }}
               >
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "72px minmax(0, 1fr) auto",
+                    gap: "0.75rem",
+                    alignItems: "center",
+                  }}
+                >
                 <div style={{ fontSize: "0.8rem", color: "var(--ink-muted)", lineHeight: 1.35 }}>
                   <div>{formatTime(b.start)}</div>
                   <div>{formatTime(b.end)}</div>
                 </div>
-                <Link href={`/tasks/${b.task!.id}`}>
+                <Link href={`/tasks/${b.task!.id}`} style={{ minWidth: 0 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: "0.45rem" }}>
                     <span
                       className="priority-dot"
@@ -169,7 +176,8 @@ export function TodayView() {
                 >
                   <Check size={18} />
                 </button>
-              </div>
+                </div>
+              </TaskFadeCard>
             ))}
           </div>
         )}
@@ -182,26 +190,35 @@ export function TodayView() {
         ) : (
           <div style={{ display: "grid", gap: "0.5rem" }}>
             {backlog.map((t) => (
-              <Link
+              <TaskFadeCard
                 key={t.id}
-                href={`/tasks/${t.id}`}
+                headerImageUrl={t.headerImageUrl ?? taskById.get(t.id)?.headerImageUrl}
+                fadeColor={t.bucket?.color ?? priorityColor(t.priority)}
                 style={{
-                  display: "flex",
-                  gap: "0.6rem",
-                  alignItems: "center",
-                  padding: "0.55rem 0.35rem",
+                  padding: "0.55rem 0.75rem",
+                  borderLeft: t.bucket ? `4px solid ${t.bucket.color}` : undefined,
                 }}
               >
-                <span className="priority-dot" style={{ background: priorityColor(t.priority) }} />
-                {t.bucket && <span className="bucket-swatch" style={{ background: t.bucket.color }} />}
-                <span style={{ flex: 1 }}>
-                  {t.emoji ? `${t.emoji} ` : ""}
-                  {t.title}
-                </span>
-                <span style={{ color: "var(--ink-muted)", fontSize: "0.8rem" }}>
-                  {formatMinutes(t.estimateMinutes)}
-                </span>
-              </Link>
+                <Link
+                  href={`/tasks/${t.id}`}
+                  style={{
+                    display: "flex",
+                    gap: "0.6rem",
+                    alignItems: "center",
+                    minWidth: 0,
+                  }}
+                >
+                  <span className="priority-dot" style={{ background: priorityColor(t.priority) }} />
+                  {t.bucket && <span className="bucket-swatch" style={{ background: t.bucket.color }} />}
+                  <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {t.emoji ? `${t.emoji} ` : ""}
+                    {t.title}
+                  </span>
+                  <span style={{ color: "var(--ink-muted)", fontSize: "0.8rem" }}>
+                    {formatMinutes(t.estimateMinutes)}
+                  </span>
+                </Link>
+              </TaskFadeCard>
             ))}
           </div>
         )}

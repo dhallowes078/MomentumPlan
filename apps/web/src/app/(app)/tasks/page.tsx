@@ -6,11 +6,11 @@ import { ArrowDownWideNarrow, Folders, GripVertical, Plus, RotateCcw } from "luc
 import { formatMinutes, priorityColor } from "@/lib/format";
 import { NewTaskModal } from "@/components/NewTaskModal";
 import { CreateChooser } from "@/components/CreateChooser";
+import { TaskFadeCard } from "@/components/TaskFadeCard";
 import { useLocalTasks, useLocalWorkspaces } from "@/lib/local/hooks";
 import * as repo from "@/lib/local/repo";
 import type { LocalTask } from "@/lib/local/db";
 import { saveAndSync } from "@/lib/local/sync";
-import { resolveMediaUrl } from "@/lib/sync-api";
 
 type SortMode = "manual" | "priority" | "bucket";
 
@@ -318,40 +318,38 @@ export default function TasksPage() {
         ) : (
           list.map((t, i) => {
             const fadeColor = t.bucket?.color ?? priorityColor(t.priority);
-            const mediaSrc = t.headerImageUrl ? resolveMediaUrl(t.headerImageUrl) : null;
             return (
-            <div
+            <TaskFadeCard
               key={t.id}
-              className={`card task-fade-card ${
+              headerImageUrl={t.headerImageUrl}
+              fadeColor={fadeColor}
+              className={`${
                 dragIndex === i ? "drag-ghost" : overIndex === i && dragIndex != null ? "dragging-item" : ""
               }`}
-              data-has-header={mediaSrc ? "true" : undefined}
-              onDragOver={
-                canReorder
-                  ? (e) => {
-                      e.preventDefault();
-                      onDragOver(i);
-                    }
-                  : undefined
-              }
               style={
                 {
                   padding: "0.85rem 1rem",
-                  display: "grid",
-                  gridTemplateColumns: canReorder ? "28px 1fr auto" : "1fr auto",
-                  gap: "0.75rem",
-                  alignItems: "center",
                   borderLeft: t.bucket ? `4px solid ${t.bucket.color}` : undefined,
                   transition: "transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease",
-                  ["--fade-color" as string]: fadeColor,
                 } as React.CSSProperties
               }
             >
-              {mediaSrc ? (
-                <div className="task-fade-photo" aria-hidden>
-                  <img src={mediaSrc} alt="" />
-                </div>
-              ) : null}
+              <div
+                onDragOver={
+                  canReorder
+                    ? (e) => {
+                        e.preventDefault();
+                        onDragOver(i);
+                      }
+                    : undefined
+                }
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: canReorder ? "28px minmax(0, 1fr) auto" : "minmax(0, 1fr) auto",
+                  gap: "0.75rem",
+                  alignItems: "center",
+                }}
+              >
               {canReorder ? (
                 <span
                   draggable
@@ -391,7 +389,8 @@ export default function TasksPage() {
                   <RotateCcw size={16} />
                 </button>
               ) : null}
-            </div>
+              </div>
+            </TaskFadeCard>
             );
           })
         )}

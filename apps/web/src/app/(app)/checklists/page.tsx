@@ -3,10 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { ListChecks, Plus, Trash2 } from "lucide-react";
 import { ChecklistEditor, type ChecklistDraftItem } from "@/components/ChecklistEditor";
-import { NewTaskModal } from "@/components/NewTaskModal";
 import { useLocalChecklists, useLocalWorkspaces } from "@/lib/local/hooks";
 import * as repo from "@/lib/local/repo";
 import { saveAndSync } from "@/lib/local/sync";
+import { openNewTask } from "@/lib/new-task";
 import type { LocalChecklist, LocalChecklistItem } from "@/lib/local/db";
 
 type Draft = { title: string; items: ChecklistDraftItem[] };
@@ -34,7 +34,6 @@ export default function ChecklistsPage() {
   const workspaces = useLocalWorkspaces();
   const [workspaceId, setWorkspaceId] = useState("");
   const lists = useLocalChecklists(workspaceId);
-  const [taskTitle, setTaskTitle] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [saving, setSaving] = useState(false);
 
@@ -202,7 +201,7 @@ export default function ChecklistsPage() {
                 onChange={(items) => updateDraft(list, { items })}
                 onMakeTask={(item) => {
                   const name = item.text.trim();
-                  if (name) setTaskTitle(name);
+                  if (name) openNewTask({ title: name, mode: "full", variant: "task" });
                 }}
               />
               <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.4rem" }}>
@@ -228,15 +227,7 @@ export default function ChecklistsPage() {
             </div>
           );
         })
-      )}
-
-      <NewTaskModal
-        open={taskTitle != null}
-        initialTitle={taskTitle ?? ""}
-        initialMode="full"
-        variant="task"
-        onClose={() => setTaskTitle(null)}
-      />
+        )}
     </div>
   );
 }

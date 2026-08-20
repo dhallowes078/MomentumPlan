@@ -366,6 +366,7 @@ export async function createLocalTask(input: {
             estimateMinutes: task.estimateMinutes,
             status: task.status,
             emoji: task.emoji,
+            headerImageUrl: task.headerImageUrl,
             bucket,
           },
         }))

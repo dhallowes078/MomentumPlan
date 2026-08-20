@@ -18,6 +18,7 @@ import clsx from "clsx";
 import { NewTaskModal } from "@/components/NewTaskModal";
 import { TrafficLights } from "@/components/TrafficLights";
 import { LocalDataProvider, useSync } from "@/components/LocalDataProvider";
+import { subscribeNewTask } from "@/lib/new-task";
 
 const links = [
   { href: "/today", label: "Today", icon: SunMedium },
@@ -99,6 +100,16 @@ function AppShellInner({
   const [newTaskOpen, setNewTaskOpen] = useState(false);
   const [newTaskMode, setNewTaskMode] = useState<"simple" | "full">("full");
   const [newVariant, setNewVariant] = useState<"task" | "event">("task");
+  const [newTaskTitle, setNewTaskTitle] = useState("");
+
+  useEffect(() => {
+    return subscribeNewTask((detail) => {
+      setNewVariant(detail.variant ?? "task");
+      setNewTaskMode(detail.mode ?? "full");
+      setNewTaskTitle(detail.title ?? "");
+      setNewTaskOpen(true);
+    });
+  }, []);
 
   useEffect(() => {
     void import("@capacitor/core")
@@ -136,6 +147,7 @@ function AppShellInner({
           <button
             className="btn"
             onClick={() => {
+              setNewTaskTitle("");
               setNewVariant("task");
               setNewTaskMode("full");
               setNewTaskOpen(true);
@@ -146,6 +158,7 @@ function AppShellInner({
           <button
             className="btn secondary"
             onClick={() => {
+              setNewTaskTitle("");
               setNewVariant("event");
               setNewTaskMode("full");
               setNewTaskOpen(true);
@@ -197,7 +210,7 @@ function AppShellInner({
                 borderRadius: "10px",
                 fontSize: "0.68rem",
                 fontWeight: 600,
-                color: active ? "var(--brand)" : "var(--ink-muted)",
+                color: active ? undefined : "var(--ink-muted)",
               }}
             >
               <Icon size={18} />
@@ -211,7 +224,11 @@ function AppShellInner({
         open={newTaskOpen}
         initialMode={newTaskMode}
         variant={newVariant}
-        onClose={() => setNewTaskOpen(false)}
+        initialTitle={newTaskTitle}
+        onClose={() => {
+          setNewTaskOpen(false);
+          setNewTaskTitle("");
+        }}
       />
     </div>
   );

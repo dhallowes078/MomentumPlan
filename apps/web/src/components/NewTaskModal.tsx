@@ -365,7 +365,7 @@ export function NewTaskModal({
       style={{
         position: "fixed",
         inset: 0,
-        zIndex: 200,
+        zIndex: 400,
         background: "rgba(10, 16, 12, 0.45)",
         display: "flex",
         alignItems: "center",

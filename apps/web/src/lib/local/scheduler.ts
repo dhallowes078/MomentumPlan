@@ -143,6 +143,7 @@ export async function runLocalScheduler() {
             estimateMinutes: task.estimateMinutes,
             status: task.status,
             emoji: task.emoji,
+            headerImageUrl: task.headerImageUrl,
             bucket,
           }
         : undefined,

@@ -517,6 +517,7 @@ export async function pullFromServer() {
           estimateMinutes: b.task.estimateMinutes,
           status: b.task.status,
           emoji: b.task.emoji ?? null,
+          headerImageUrl: b.task.headerImageUrl ?? null,
           bucket: b.task.bucket ?? null,
         },
       }))
@@ -546,6 +547,7 @@ export async function pullFromServer() {
           estimateMinutes: b.task.estimateMinutes,
           status: b.task.status,
           emoji: b.task.emoji ?? null,
+          headerImageUrl: b.task.headerImageUrl ?? null,
           bucket: b.task.bucket ?? null,
         },
       }))

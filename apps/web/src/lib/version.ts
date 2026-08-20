@@ -14,6 +14,16 @@ export type ChangelogEntry = {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.4.2",
+    date: "2026-08-20",
+    changes: [
+      "Focus mode checklist text is much larger",
+      "Make task from a checklist item now opens the new-task screen on phone",
+      "Active nav and calendar hour badges use white text on the brand colour",
+      "Task header photos fade in from the right without shoving the title aside",
+    ],
+  },
+  {
     version: "0.4.1",
     date: "2026-08-19",
     changes: [

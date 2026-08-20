@@ -67,7 +67,7 @@ export type LocalScheduleBlock = {
   completed: boolean;
   task?: Pick<
     LocalTask,
-    "id" | "title" | "priority" | "atRisk" | "estimateMinutes" | "status" | "emoji"
+    "id" | "title" | "priority" | "atRisk" | "estimateMinutes" | "status" | "emoji" | "headerImageUrl"
   > & { bucket?: LocalBucket | null };
 };
 
